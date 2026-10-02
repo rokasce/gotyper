@@ -14,7 +14,7 @@ func TestSelftestPasses(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out strings.Builder
-	if err := selftest(&out, lib); err != nil {
+	if err := selftest(&out, lib, filepath.Join(t.TempDir(), "stats.jsonl")); err != nil {
 		t.Fatalf("selftest: %v", err)
 	}
 	if !strings.Contains(out.String(), "ok") {

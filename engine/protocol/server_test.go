@@ -29,12 +29,19 @@ const (
 	recallStep = "json-api/02-greet-handler-recall"
 )
 
-// serve feeds input to a fresh server and returns the decoded responses, one
-// per output line.
+// serve feeds input to a fresh server, with a stats file of its own, and
+// returns the decoded responses, one per output line.
 func serve(t *testing.T, input string) []Response {
 	t.Helper()
+	return serveStats(t, input, filepath.Join(t.TempDir(), "stats.jsonl"))
+}
+
+// serveStats is serve with the stats file at statsPath, for tests that look
+// at what was recorded.
+func serveStats(t *testing.T, input, statsPath string) []Response {
+	t.Helper()
 	var out strings.Builder
-	if err := NewServer(context.Background(), lessons).Serve(strings.NewReader(input), &out); err != nil {
+	if err := NewServer(context.Background(), lessons, statsPath).Serve(strings.NewReader(input), &out); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	var resps []Response
@@ -229,7 +236,7 @@ func TestStartWithoutIDPicksTheFirstStep(t *testing.T) {
 func TestStartWithNoLessons(t *testing.T) {
 	var out strings.Builder
 	in := hello + `{"id":2,"op":"start"}` + "\n" + `{"id":3,"op":"list"}` + "\n"
-	if err := NewServer(context.Background(), lesson.Library{}).Serve(strings.NewReader(in), &out); err != nil {
+	if err := NewServer(context.Background(), lesson.Library{}, filepath.Join(t.TempDir(), "stats.jsonl")).Serve(strings.NewReader(in), &out); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
@@ -332,7 +339,9 @@ func TestCancelStopsChecksAndCleansUp(t *testing.T) {
 	in, feed := io.Pipe()
 	defer feed.Close()
 	served := make(chan error, 1)
-	go func() { served <- NewServer(ctx, lessons).Serve(in, io.Discard) }()
+	go func() {
+		served <- NewServer(ctx, lessons, filepath.Join(t.TempDir(), "stats.jsonl")).Serve(in, io.Discard)
+	}()
 	go io.WriteString(feed, hello+
 		`{"id":2,"op":"start","step":"`+firstStep+`"}`+"\n"+
 		`{"id":3,"op":"check","lines":`+linesJSON(t, step.Target)+`}`+"\n")

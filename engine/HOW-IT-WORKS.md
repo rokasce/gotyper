@@ -5,7 +5,8 @@ lessons from disk. The Neovim plugin picks a step and then sends the buffer
 on every change. The engine answers with what to paint: red
 spans, ghost text and stats. When asked, it also compiles and tests the
 buffer with the go command. This page follows one keystroke and one check
-through the code and shows how to run the engine by hand.
+through the code, shows where finished steps are recorded, and shows how to
+run the engine by hand.
 
 ## Which file does what
 
@@ -18,14 +19,15 @@ through the code and shows how to run the engine by hand.
 | `judge/judge.go` | The result types the front end paints: `Span`, `Ghost`, `Stats`, `Render`. |
 | `judge/session.go` | The diff and the scoring: `Session.Update`, `Restart`, `Indents`. Recall steps skip the diff. |
 | `check/check.go` | `check.Run`: builds a step's module with a given version of its file and runs `go vet` and `go test` on it. |
+| `stats/stats.go` | The stats file: `Record` (one completed step), `Append`, `Load` (skips damaged lines), `Bests` (per-step bests) and `DefaultPath`. |
 | `judge/text.go` | Tab helpers: indentation width and tab expansion. |
 | `lesson/lesson.go` | The `Step`, `Track` and `Library` types, and `Load`, which reads and validates the lessons directory. |
 | `lesson/lessons_test.go` | `TestLessonsOnDisk`: runs `check.Run` on every step's own target. |
 | `PROTOCOL.md` | The wire schema. |
 | `../lessons/` | The lessons themselves. `../lessons/README.md` describes the format. |
 
-Packages only depend downwards: `main` → `protocol` → `judge` and `check`
-→ `lesson`.
+Packages only depend downwards: `main` → `protocol` → `judge`, `check` and
+`stats` → `lesson`.
 
 ## Loading the lessons
 
@@ -180,6 +182,40 @@ passes that context to `NewServer`. When it is cancelled, `Serve` returns
 without waiting for more input, the running checks are stopped, and
 `check.Run` still removes their temporary directories.
 
+## Recording finished steps
+
+The engine remembers every finished step in a file, so the learner can see
+their bests later. The file is `gotyper/stats.jsonl` under `$XDG_DATA_HOME`,
+or under `~/.local/share` when that variable is not set: the same base
+directory Neovim keeps its data in. `stats.DefaultPath` works it out, `main`
+passes it to `NewServer`, and the tests pass a temporary file instead.
+
+1. **Remembering the attempt.** The server keeps the latest render it sent
+   (`last`), and under a mutex the attempt number (`attempt`, increased by
+   every `start` and `restart`) and the latest update's buffer (`lines`).
+2. **When a check is sent**, `checkJob` notes, on the request goroutine,
+   whether the attempt is complete if the check passes: always in a recall
+   step, and in a type-along step only if `last.Done`. It also notes the
+   stats from `last` and the attempt number.
+3. **When the check finishes**, on its own goroutine, it records the step
+   only if it passed and `stillAt` says the same attempt is still going with
+   the same buffer. That is why a restart while the check runs, or an edit
+   to a recall step meanwhile, leaves nothing behind: the learner gave that
+   attempt up, or is no longer at the code that passed. The plugin applies
+   the same rule when it decides whether a recall step is done.
+4. **`stats.Append` writes one line.** The file is JSON Lines, like the
+   protocol: one JSON object per line. It opens the file with `O_APPEND`, so
+   it only ever adds to the end and never rewrites old lines. If writing
+   fails, the error goes to stderr (the plugin shows it as a warning) and the
+   check is still answered.
+
+The `stats` op reads the file back. `stats.Load` decodes it line by line and
+skips any line that is not a valid record: a crash while appending can leave
+half a line at the end, and one bad line should not hide every other result.
+A missing file just means nothing was finished yet. `stats.Bests` then folds
+the records into one summary per step (best WPM, best accuracy, fewest
+keystrokes, completions, last played) and sorts them by step id.
+
 ## The Neovim side
 
 The plugin lives outside this directory, in `plugin/` and `lua/gotyper/` at the
@@ -188,10 +224,10 @@ answer.
 
 | File | Role |
 |---|---|
-| `plugin/gotyper.lua` | Defines `:Gotyper` (with completion of step ids), `:GotyperRestart`, `:GotyperPanel` and `:GotyperSubmit`. |
-| `lua/gotyper/engine.lua` | Builds this engine into `bin/` when its sources are newer than the binary, starts it as a job, and frames NDJSON requests and responses by `id`. |
-| `lua/gotyper/init.lua` | The step picker and the session: the game tab and buffer, change tracking, key counting, auto-indent, restart, checks and their results, the panel toggle and teardown. |
-| `lua/gotyper/ui.lua` | Painting: error spans and ghosts as extmarks, ghost lines as virtual lines, the stats winbar and the panel. |
+| `plugin/gotyper.lua` | Defines `:Gotyper` (with completion of step ids), `:GotyperRestart`, `:GotyperPanel`, `:GotyperSubmit` and `:GotyperStats`. |
+| `lua/gotyper/engine.lua` | Builds this engine into `bin/` when its sources are newer than the binary, starts it as a job, and frames NDJSON requests and responses by `id`. Also asks a short-lived engine for `list` and `stats`. |
+| `lua/gotyper/init.lua` | The step picker and the session: the game tab and buffer, change tracking, key counting, auto-indent, restart, checks and their results, the panel toggle and teardown. Also `:GotyperStats`. |
+| `lua/gotyper/ui.lua` | Painting: error spans and ghosts as extmarks, ghost lines as virtual lines, the stats winbar, the panel and the stats window. |
 | `test/run.sh`, `test/drive.lua` | End-to-end test: a real headless Neovim driven key by key over its RPC socket. |
 
 `:Gotyper` without a step id, and completing its argument, run a short-lived
@@ -240,6 +276,10 @@ What happens when a check runs:
    check, and a pass for a buffer edited since then does not complete the
    step: the panel says the code changed and asks for another submit.
 
+`:GotyperStats` runs a short-lived engine, as the picker does, and sends it
+`hello` and `stats`. `ui.show_stats` lists the answer in a floating window,
+one row per step; `q` or `<Esc>` closes it.
+
 ## Run it and poke it by hand
 
 From the `engine/` directory:
@@ -276,6 +316,10 @@ per line, and press Ctrl-D to end. Things worth trying:
   with `undefined: greetHandler`, because the hidden `main.go` uses a
   function that file doesn't have. Send an `update` straight after it: its
   answer comes first.
+- Send `{"id":8,"op":"stats"}` to see your bests. Play with a stats file of
+  your own by setting `XDG_DATA_HOME`, for example
+  `XDG_DATA_HOME=/tmp/gt go run ./cmd/gotyper-engine --lessons ../lessons`,
+  and add a line of garbage to `/tmp/gt/gotyper/stats.jsonl`: it is skipped.
 - Send `"protocol":2` in the `hello` to get `version_mismatch`.
 - Type a line of garbage to get `bad_json`. The engine keeps answering.
 - Move `cursor` away from the typo in an update. The span is still red, but

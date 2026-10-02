@@ -12,6 +12,9 @@
 // repository's lessons/ when the binary is built into <repo>/bin/ as the
 // Neovim plugin does. go run builds the binary in a temporary directory, so
 // pass --lessons ../lessons when running from engine/.
+//
+// Every completed step is added to the stats file, gotyper/stats.jsonl
+// under $XDG_DATA_HOME or ~/.local/share (see package stats).
 package main
 
 import (
@@ -26,6 +29,7 @@ import (
 
 	"github.com/rokasce/gotyper/engine/lesson"
 	"github.com/rokasce/gotyper/engine/protocol"
+	"github.com/rokasce/gotyper/engine/stats"
 )
 
 const usage = "usage: gotyper-engine [--lessons DIR] [--selftest]"
@@ -57,8 +61,14 @@ func run(args []string) int {
 		return 1
 	}
 
+	statsPath, err := stats.DefaultPath()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gotyper-engine:", err)
+		return 1
+	}
+
 	if *selftestFlag {
-		if err := selftest(os.Stdout, lib); err != nil {
+		if err := selftest(os.Stdout, lib, statsPath); err != nil {
 			fmt.Fprintln(os.Stderr, "selftest FAILED:", err)
 			return 1
 		}
@@ -73,7 +83,7 @@ func run(args []string) int {
 	// their temporary directories before the engine exits.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
-	if err := protocol.NewServer(ctx, lib).Serve(os.Stdin, os.Stdout); err != nil {
+	if err := protocol.NewServer(ctx, lib, statsPath).Serve(os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "gotyper-engine:", err)
 		return 1
 	}

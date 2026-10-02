@@ -493,6 +493,19 @@ function M.toggle_panel()
   end
 end
 
+-- show_stats opens a floating window with the bests of every step completed
+-- so far: best WPM and accuracy, fewest keystrokes, how often it was
+-- completed and when it was last played. The engine keeps them in its stats
+-- file (engine/PROTOCOL.md, "stats"); a short-lived engine reads them, so this
+-- works with or without a game running.
+function M.show_stats()
+  local bin, err = engine.ensure()
+  if not bin then return vim.notify(err, vim.log.levels.ERROR) end
+  local steps, stats_err = engine.stats(bin)
+  if not steps then return vim.notify(stats_err, vim.log.levels.ERROR) end
+  ui.show_stats(steps)
+end
+
 -- stop ends the session: remove our hooks, close the panel, stop the engine
 -- and wipe the game buffer. Safe to call more than once.
 function M.stop()

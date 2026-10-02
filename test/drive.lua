@@ -245,7 +245,30 @@ rq("nvim_command", "tabclose")
 vim.uv.sleep(200)
 check(state() == nil, "closing the tab ends the recall game")
 
--- 9. A front end speaking another protocol version gets a clear message.
+-- 9. :GotyperStats lists each completed step once: the type-along step from
+--    section 5 and the recall step from section 8. The restarted attempts
+--    and the pass for code edited while it was checked are not counted.
+rq("nvim_command", "GotyperStats")
+local float = lua([[
+  local win = vim.api.nvim_get_current_win()
+  return { relative = vim.api.nvim_win_get_config(win).relative,
+    lines = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win), 0, -1, false) }
+]])
+check(float.relative == "editor", ":GotyperStats opens a floating window")
+local rows = {}
+for _, l in ipairs(float.lines) do
+  local step, done = l:match("^(%S+)%s.-(%d+)%s+%d%d%d%d%-%d%d%-%d%d %d%d:%d%d$")
+  if step then rows[step] = tonumber(done) end
+end
+check(rows["json-api/01-greet-handler"] == 1 and rows["json-api/02-greet-handler-recall"] == 1,
+  "it lists each completed step, completed once:\n" .. table.concat(float.lines, "\n"))
+key("q")
+check(lua("return vim.api.nvim_win_get_config(0).relative") == "", "q closes it")
+rq("nvim_command", "GotyperStats")
+key("<Esc>")
+check(lua("return vim.api.nvim_win_get_config(0).relative") == "", "and so does <Esc>")
+
+-- 10. A front end speaking another protocol version gets a clear message.
 lua([[
   _G.gotyper_msgs = {}
   vim.notify = function(msg) table.insert(_G.gotyper_msgs, msg) end

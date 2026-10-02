@@ -19,7 +19,7 @@ To install it with [lazy.nvim](https://github.com/folke/lazy.nvim):
 ```lua
 {
   "rokasce/gotyper", -- or: dir = "~/path/to/gotyper"
-  cmd = { "Gotyper", "GotyperRestart", "GotyperPanel", "GotyperSubmit" },
+  cmd = { "Gotyper", "GotyperRestart", "GotyperPanel", "GotyperSubmit", "GotyperStats" },
 }
 ```
 
@@ -39,6 +39,12 @@ Some steps are **recall** steps: you write the file from memory, with no ghost t
 | `:tabclose` or `:q` | | End the game. The engine stops and the game buffer is wiped. |
 
 To use other keys, map `:GotyperRestart`, `:GotyperSubmit` and `:GotyperPanel` to them in your own config.
+
+### Your stats
+
+Every time you finish a step (a type-along step whose check passes, or a recall step you submit and pass), gotyper records the attempt: WPM, accuracy, keystrokes, charged errors and time. Restarted or abandoned attempts are not recorded. `:GotyperStats` opens a window listing each step you have finished with your best WPM, best accuracy, fewest keystrokes, how many times you finished it and when you last played it; `q` or `<Esc>` closes it. Recall steps have no WPM or accuracy, so those show `-`.
+
+The records live in `gotyper/stats.jsonl` under `$XDG_DATA_HOME`, or under `~/.local/share` when that is not set: the same place Neovim keeps its data. The file has one JSON line per finished step; [`engine/PROTOCOL.md`](engine/PROTOCOL.md) describes them.
 
 ### Test the plugin
 

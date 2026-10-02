@@ -114,6 +114,52 @@ function M.show_panel(panel, win, code_width, lines, title, hl)
   return panel
 end
 
+-- stats_lines formats the engine's per-step bests (the `stats` op) as a
+-- table, one row per step, for show_stats. A recall step has no WPM or
+-- accuracy (there is no target to compare against), so those show "-".
+local function stats_lines(steps)
+  if #steps == 0 then return { "No step completed yet. Finish one with :Gotyper and it shows up here." } end
+  local width = #"step"
+  for _, st in ipairs(steps) do width = math.max(width, #st.step) end
+  local row = "%-" .. width .. "s  %8s  %8s  %11s  %5s  %s"
+  local lines = { row:format("step", "best WPM", "best acc", "fewest keys", "done", "last played") }
+  for _, st in ipairs(steps) do
+    local recall = st.mode == "recall"
+    -- last_played is RFC 3339, "2026-10-01T10:00:00.123+03:00": keep the
+    -- date and the hour and minute.
+    local when = st.last_played:sub(1, 10) .. " " .. st.last_played:sub(12, 16)
+    lines[#lines + 1] = row:format(st.step,
+      recall and "-" or ("%.0f"):format(st.best_wpm),
+      recall and "-" or ("%.1f%%"):format(st.best_accuracy),
+      st.fewest_keys, st.completions, when)
+  end
+  return lines
+end
+
+-- show_stats opens a centred floating window listing `steps`, the engine's
+-- per-step bests, and moves the cursor into it. q or <Esc> closes it. It
+-- returns the window.
+function M.show_stats(steps)
+  local lines = stats_lines(steps)
+  local width = 0
+  for _, l in ipairs(lines) do width = math.max(width, vim.fn.strdisplaywidth(l)) end
+  width = math.max(1, math.min(width, vim.o.columns - 4))
+  local height = math.max(1, math.min(#lines, vim.o.lines - 4))
+  local buf = api.nvim_create_buf(false, true)
+  api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].bufhidden = "wipe" -- closing the window deletes the buffer too
+  local win = api.nvim_open_win(buf, true, {
+    relative = "editor", width = width, height = height, style = "minimal", border = "rounded",
+    row = math.floor((vim.o.lines - height) / 2) - 1, col = math.floor((vim.o.columns - width) / 2),
+    title = " gotyper stats ", title_pos = "left",
+  })
+  for _, k in ipairs({ "q", "<Esc>" }) do
+    vim.keymap.set("n", k, function() api.nvim_win_close(win, true) end, { buffer = buf, nowait = true, desc = "gotyper: close the stats" })
+  end
+  return win
+end
+
 -- close_panel closes the panel window and wipes its scratch buffer.
 function M.close_panel(panel)
   if panel and api.nvim_win_is_valid(panel.win) then api.nvim_win_close(panel.win, true) end
