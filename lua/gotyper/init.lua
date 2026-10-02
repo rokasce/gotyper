@@ -267,9 +267,49 @@ local function install_hooks()
   end })
 end
 
--- start opens a new game: build and launch the engine, check it speaks our
--- protocol version (hello), then ask for the step (start) and paint it.
-function M.start()
+-- list_steps returns every step the engine offers, in play order, each as
+-- { id, title, mode, track }. On failure it returns nil and a message.
+local function list_steps()
+  local bin, err = engine.ensure()
+  if not bin then return nil, err end
+  local tracks, list_err = engine.list(bin)
+  if not tracks then return nil, list_err end
+  local steps = {}
+  for _, track in ipairs(tracks) do
+    for _, step in ipairs(track.steps) do
+      steps[#steps + 1] = { id = step.id, title = step.title, mode = step.mode, track = track.id }
+    end
+  end
+  return steps
+end
+
+-- step_ids returns the id of every step the engine offers, for completing
+-- the argument of :Gotyper. It returns an empty list when the engine cannot
+-- be built or run, since completion has no good place to show an error.
+function M.step_ids()
+  local ids = {}
+  for _, step in ipairs(list_steps() or {}) do ids[#ids + 1] = step.id end
+  return ids
+end
+
+-- pick lets the learner choose a step and starts it. It uses vim.ui.select,
+-- so a picker plugin in the learner's config (telescope, fzf-lua, ...) shows
+-- the list if it replaces vim.ui.select; plain Neovim shows a numbered list.
+function M.pick()
+  local steps, err = list_steps()
+  if not steps then return vim.notify(err, vim.log.levels.ERROR) end
+  vim.ui.select(steps, {
+    prompt = "gotyper: pick a step",
+    format_item = function(step) return ("%s: %s (%s)"):format(step.track, step.title, step.mode) end,
+  }, function(step)
+    if step then M.start(step.id) end -- step is nil when the learner cancels
+  end)
+end
+
+-- start opens a new game of the step with id `step` (see list_steps): build
+-- and launch the engine, check it speaks our protocol version (hello), then
+-- ask for the step (start) and paint it.
+function M.start(step)
   if S then M.stop() end
   ui.set_highlights()
   local bin, err = engine.ensure()
@@ -293,13 +333,10 @@ function M.start()
   client.request("hello", { protocol = engine.PROTOCOL }, function(hello)
     if not S or S.client ~= client then return end
     if hello.error then
-      local found = hello.hello and (" (found engine %s, protocol %d)"):format(hello.hello.engine, hello.hello.protocol) or ""
       M.stop()
-      return vim.notify(("gotyper: the engine and the plugin do not match%s:\n%s\n"
-        .. "Rebuild the engine by deleting %s/bin and running :Gotyper again."):format(
-          found, hello.error.message, engine.root), vim.log.levels.ERROR)
+      return vim.notify(engine.mismatch_message(hello), vim.log.levels.ERROR)
     end
-    client.request("start", {}, function(resp)
+    client.request("start", { step = step }, function(resp)
       if not S or S.client ~= client then return end
       if not api.nvim_buf_is_valid(S.buf) then return M.stop() end -- the tab was closed already
       if resp.error then

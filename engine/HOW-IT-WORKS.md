@@ -130,15 +130,18 @@ answer.
 
 | File | Role |
 |---|---|
-| `plugin/gotyper.lua` | Defines `:Gotyper`, `:GotyperRestart` and `:GotyperPanel`. |
+| `plugin/gotyper.lua` | Defines `:Gotyper` (with completion of step ids), `:GotyperRestart` and `:GotyperPanel`. |
 | `lua/gotyper/engine.lua` | Builds this engine into `bin/` when its sources are newer than the binary, starts it as a job, and frames NDJSON requests and responses by `id`. |
-| `lua/gotyper/init.lua` | The session: the game tab and buffer, change tracking, key counting, auto-indent, restart, the panel toggle and teardown. |
+| `lua/gotyper/init.lua` | The step picker and the session: the game tab and buffer, change tracking, key counting, auto-indent, restart, the panel toggle and teardown. |
 | `lua/gotyper/ui.lua` | Painting: error spans and ghosts as extmarks, ghost lines as virtual lines, the stats winbar and the explanation panel. |
 | `test/run.sh`, `test/drive.lua` | End-to-end test: a real headless Neovim driven key by key over its RPC socket. |
 
-Starting a game sends `hello` first. If the engine answers `version_mismatch`,
-the plugin closes the game tab and shows the engine's message. Otherwise it
-sends `start` and paints the returned `render`.
+`:Gotyper` without a step id, and completing its argument, run a short-lived
+engine that answers `hello` and `list`; the picker (`vim.ui.select`) shows the
+listed steps. Starting the chosen step launches the game's own engine and
+sends `hello` first. If the engine answers `version_mismatch`, the plugin
+closes the game tab and shows the engine's message. Otherwise it sends `start`
+with the step id and paints the returned `render`.
 
 On every buffer change Neovim calls the plugin's `on_lines` hook. The plugin
 schedules one `update` for when Neovim is next idle, so a paste or a `dd` sends
