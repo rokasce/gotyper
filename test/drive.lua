@@ -105,6 +105,16 @@ m = marks()
 check(m.err == 0 and m.ghost == 1 and m.vlines == #target - 1, "restart repaints the empty attempt")
 check(s.keys == 0 and s.last.stats.keys == 0, "restart resets the key count")
 check(rq("nvim_get_mode").mode == "i", "restart returns to insert mode")
+-- A key typed in the same input chunk as <F5> must not leak into the new
+-- attempt: its update is still scheduled when the restart is sent.
+rq("nvim_input", "x<F5>")
+vim.uv.sleep(200)
+key("p")
+s = wait(function(st) return st.last.stats.keys >= 1 end, 5000)
+check(s.last.stats.errors == 0 and #s.last.error_spans == 0,
+  "a change typed right before restart is not judged in the new attempt (errors " .. s.last.stats.errors .. ")")
+key("<F5>")
+s = wait(function(st) return st.keys == 0 and st.last.stats.keys == 0 end, 5000)
 rq("nvim_command", "stopinsert")
 vim.uv.sleep(50)
 check(rq("nvim_get_mode").mode == "n", "(left insert mode)")

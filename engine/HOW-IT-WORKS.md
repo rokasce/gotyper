@@ -150,7 +150,10 @@ What happens when the learner presses the restart key (`<F5>`):
 
 1. `vim.on_key` counts the key, like every key pressed in the game buffer.
 2. The buffer-local mapping calls `restart()` in `lua/gotyper/init.lua`. It
-   marks every update still in flight as stale and sends `{"op":"restart"}`.
+   marks every update still in flight as stale, holds back new updates until
+   the engine answers, and sends `{"op":"restart"}`. Without the hold, a change
+   typed just before the key could reach the engine after the restart and be
+   judged as part of the new attempt.
 3. The engine clears the attempt (`Session.Restart`) and answers with the step
    layout and the render of an empty buffer.
 4. The plugin empties the buffer without making it undoable, sets its key count

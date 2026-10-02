@@ -17,16 +17,11 @@ M.PROTOCOL = 1
 local root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
 M.root = root
 
--- go_binary returns the path of the go command, or nil when Go is not
--- installed. Besides PATH it checks the usual install locations, because
--- Neovim started from a desktop launcher may not see the shell's PATH.
+-- go_binary returns the path of the go command on PATH, or nil when Go is
+-- not installed.
 local function go_binary()
   local found = vim.fn.exepath("go")
   if found ~= "" then return found end
-  for _, p in ipairs({ "~/.local/go/bin/go", "~/.local/bin/go", "/usr/local/go/bin/go", "~/go/bin/go" }) do
-    local path = vim.fn.expand(p)
-    if vim.fn.executable(path) == 1 then return path end
-  end
   return nil
 end
 
@@ -50,11 +45,6 @@ function M.ensure()
 
   local go = go_binary()
   if not go then
-    if built >= 0 then
-      vim.notify("gotyper: engine sources changed but Go is not installed; using the old engine",
-        vim.log.levels.WARN)
-      return bin
-    end
     return nil, "gotyper needs Go to build its engine, but the go command was not found.\n"
       .. "Install Go (https://go.dev/dl/) and make sure `go` is on your PATH."
   end

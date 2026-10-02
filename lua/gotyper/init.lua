@@ -13,20 +13,11 @@ local M = {}
 
 local api, engine, ui = vim.api, require("gotyper.engine"), require("gotyper.ui")
 
--- config holds the options set through setup(). keys are the buffer-local
--- mappings in the game buffer, active in both normal and insert mode.
-M.config = {
-  keys = {
-    restart = "<F5>", -- throw the attempt away and type the step again
-    panel = "<F2>", -- show or hide the explanation panel
-  },
-}
-
--- setup merges the learner's options into M.config. Calling it is optional;
--- lazy.nvim calls it with the spec's `opts`.
-function M.setup(opts)
-  M.config = vim.tbl_deep_extend("force", M.config, opts or {})
-end
+-- The game keys: buffer-local mappings in the game buffer, active in both
+-- normal and insert mode. To use other keys, map :GotyperRestart and
+-- :GotyperPanel yourself.
+local RESTART_KEY = "<F5>" -- throw the attempt away and type the step again
+local PANEL_KEY = "<F2>" -- show or hide the explanation panel
 
 -- ns_key identifies our vim.on_key hook so stop() can remove exactly it.
 local ns_key = api.nvim_create_namespace("gotyper_keys")
@@ -44,6 +35,7 @@ local ns_key = api.nvim_create_namespace("gotyper_keys")
 --   panel_hidden  the learner hid the panel with the toggle key
 --   panel_content what the panel shows (or would show, when hidden)
 --   flush_pending an update is already scheduled (see on_lines)
+--   restarting    a restart was sent and not answered yet; updates are held
 --   clearing      the plugin itself is emptying the buffer; not typing
 --   during_startup the game was started before Neovim finished starting up
 --   wiping        the game buffer is being wiped (see install_hooks)
@@ -51,8 +43,7 @@ local S
 
 -- help_lines lists the game keys, for the bottom of the panel.
 local function help_lines()
-  local k = M.config.keys
-  return { "", k.restart .. "  restart the step    " .. k.panel .. "  hide/show this panel" }
+  return { "", RESTART_KEY .. "  restart the step    " .. PANEL_KEY .. "  hide/show this panel" }
 end
 
 -- show_panel shows `lines` in the panel unless the learner has hidden it. The
@@ -77,7 +68,7 @@ local function on_done(stats)
     "",
     ("WPM %.0f   accuracy %.1f%%   keystrokes %d   %.0fs"):format(stats.wpm, stats.accuracy, stats.keys, stats.seconds),
     "",
-    "Press " .. M.config.keys.restart .. " to type it again.",
+    "Press " .. RESTART_KEY .. " to type it again.",
   }, "step done", "GotyperDone")
 end
 
@@ -95,6 +86,8 @@ end
 local function send_update()
   if not S then return end
   S.flush_pending = false
+  -- The buffer still holds the old attempt; begin_attempt will clear it.
+  if S.restarting then return end
   S.seq = S.seq + 1
   local id = S.seq
   local cur = api.nvim_win_is_valid(S.win) and api.nvim_win_get_cursor(S.win) or { 1, 0 }
@@ -202,6 +195,7 @@ local function begin_attempt(resp)
   S.seq = S.seq + 1 -- answers to updates sent before this point are stale
   S.done = false
   S.flush_pending = false
+  S.restarting = false
   clear_buffer()
   apply(resp.render)
   show_intro()
@@ -221,16 +215,15 @@ local function install_hooks()
   -- including normal-mode motions and <Esc>. Only keys pressed while the game
   -- buffer is focused are counted, and none once the step is done.
   -- The panel key is not counted: showing the explanation is not typing.
-  local panel_key = vim.keycode(M.config.keys.panel)
+  local panel_key = vim.keycode(PANEL_KEY)
   vim.on_key(function(_, typed)
     if S and typed and typed ~= "" and typed ~= panel_key and not S.done and api.nvim_get_current_buf() == S.buf then
       S.keys = S.keys + 1
     end
   end, ns_key)
 
-  local k = M.config.keys
-  vim.keymap.set({ "n", "i" }, k.restart, M.restart, { buffer = buf, desc = "gotyper: restart the step" })
-  vim.keymap.set({ "n", "i" }, k.panel, M.toggle_panel, { buffer = buf, desc = "gotyper: toggle the explanation panel" })
+  vim.keymap.set({ "n", "i" }, RESTART_KEY, M.restart, { buffer = buf, desc = "gotyper: restart the step" })
+  vim.keymap.set({ "n", "i" }, PANEL_KEY, M.toggle_panel, { buffer = buf, desc = "gotyper: toggle the explanation panel" })
 
   local group = api.nvim_create_augroup("gotyper_session", { clear = true })
   S.augroup = group
@@ -327,9 +320,14 @@ function M.restart()
   end
   local client = S.client
   S.seq = S.seq + 1 -- drop answers to updates still in flight
+  -- Hold back updates until the answer arrives: one scheduled now would send
+  -- the old buffer after the restart, and the engine would judge it as the
+  -- first change of the new attempt.
+  S.restarting = true
   client.request("restart", {}, function(resp)
     if not S or S.client ~= client then return end
     if resp.error then
+      S.restarting = false
       return vim.notify("gotyper engine: " .. resp.error.message, vim.log.levels.ERROR)
     end
     begin_attempt(resp)

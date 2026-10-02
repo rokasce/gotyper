@@ -20,10 +20,6 @@ To install it with [lazy.nvim](https://github.com/folke/lazy.nvim):
 {
   "rokasce/gotyper", -- or: dir = "~/path/to/gotyper"
   cmd = { "Gotyper", "GotyperRestart", "GotyperPanel" },
-  opts = {
-    -- these are the defaults
-    keys = { restart = "<F5>", panel = "<F2>" },
-  },
 }
 ```
 
@@ -36,6 +32,8 @@ To install it with [lazy.nvim](https://github.com/folke/lazy.nvim):
 | `<F5>` | `:GotyperRestart` | Throw the attempt away and type the step again from an empty buffer. The error count, keystrokes and timer start over. |
 | `<F2>` | `:GotyperPanel` | Hide or show the explanation panel, for when it covers code in a small terminal. |
 | `:tabclose` or `:q` | | End the game. The engine stops and the game buffer is wiped. |
+
+To use other keys, map `:GotyperRestart` and `:GotyperPanel` to them in your own config.
 
 ### Test the plugin
 
