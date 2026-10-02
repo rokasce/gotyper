@@ -8,6 +8,16 @@ import (
 
 var created = time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 
+// The intro names each field's type, and JSON alone can't tell an int from
+// an int64 or a float64, so these assignments pin the types: a field of
+// another type is a compile error.
+var (
+	_ int       = Bookmark{}.ID
+	_ string    = Bookmark{}.URL
+	_ string    = Bookmark{}.Title
+	_ time.Time = Bookmark{}.Created
+)
+
 // encode marshals b and decodes it back into a map, so the test sees the
 // JSON field names whatever order the struct declares them in.
 func encode(t *testing.T, b Bookmark) map[string]any {
