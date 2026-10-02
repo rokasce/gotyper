@@ -156,8 +156,10 @@ and do the step's hidden tests pass?
    at the first that fails. `GOWORK=off` and an empty `GOFLAGS` keep the
    learner's environment from changing the result, and `GOCACHE` points at
    gotyper's own build cache (`goCacheDir` in `cmd/gotyper-engine/main.go`).
-   Each command is killed after a minute, in case the learner's code loops
-   forever.
+   Each command is stopped after a minute, in case the learner's code loops
+   forever. It is stopped with an interrupt, so the go command can stop its
+   own children and remove its work directory; only if it is still running
+   two seconds later is it killed.
 5. **The output is tidied**: the temporary directory's path is cut out, so
    errors read `./handler.go:14:22: undefined: errors`, and only the first 20
    lines are kept for the panel.
@@ -175,7 +177,7 @@ checks still running, so they are answered. Neovim's `jobstop` also sends
 SIGTERM, which would end the engine before any cleanup ran, so `main` catches
 it with `signal.NotifyContext` and passes that context to `NewServer`. When
 it is cancelled, `Serve` returns without waiting for more input, the running
-checks and pre-warm are killed, and `check.Run` still removes their
+checks and pre-warm are stopped the same way, and `check.Run` still removes their
 temporary directories.
 
 ## The Neovim side

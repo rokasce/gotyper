@@ -39,6 +39,10 @@ const Timeout = time.Minute
 // code anyway.
 const MaxOutputLines = 20
 
+// StopGrace is how long a go command that is told to stop (its check was
+// cancelled or timed out) gets to stop by itself before it is killed.
+const StopGrace = 2 * time.Second
+
 // Result is the outcome of one check.
 type Result struct {
 	// OK is true when both go vet and go test passed.
@@ -61,7 +65,7 @@ type Result struct {
 // gocache is the go build cache directory to use (the GOCACHE environment
 // variable). The cache is what makes a second check fast: packages such as
 // net/http are compiled once and reused. An empty gocache leaves GOCACHE as
-// the environment has it. Cancelling ctx kills the go command and ends the
+// the environment has it. Cancelling ctx stops the go command and ends the
 // check early.
 func Run(ctx context.Context, step lesson.Step, source, gocache string) Result {
 	start := time.Now()
@@ -97,6 +101,11 @@ func run(ctx context.Context, step lesson.Step, source, gocache string) Result {
 		cmd := exec.CommandContext(cmdCtx, gobin, stage, "./...")
 		cmd.Dir = dir
 		cmd.Env = env
+		// Stopping the go command with an interrupt rather than a kill lets
+		// it stop the programs it started and remove its own temporary
+		// work directory. If it has not exited after StopGrace, it is killed.
+		cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+		cmd.WaitDelay = StopGrace
 		out, err = cmd.CombinedOutput()
 		timedOut := cmdCtx.Err() == context.DeadlineExceeded
 		cancel()
