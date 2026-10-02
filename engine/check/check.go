@@ -2,8 +2,8 @@
 // step's module in a temporary directory with a given version of the step's
 // file, then runs go vet and go test on it.
 //
-// The engine uses it for the check op, which grades what the learner typed,
-// and to pre-warm the build cache when a step starts. TestLessonsOnDisk uses
+// The engine uses it for the check op, which grades what the learner typed.
+// TestLessonsOnDisk uses
 // it to make sure every lesson's own target passes, so a lesson is checked in
 // exactly the way the learner's code will be.
 package check
@@ -70,19 +70,17 @@ type Result struct {
 // a fresh temporary directory, runs go vet ./... and then go test ./...
 // there, and removes the directory again.
 //
-// gocache is the go build cache directory to use (the GOCACHE environment
-// variable). The cache is what makes a second check fast: packages such as
-// net/http are compiled once and reused. An empty gocache leaves GOCACHE as
-// the environment has it. Cancelling ctx stops the go command and ends the
-// check early.
-func Run(ctx context.Context, step lesson.Step, source, gocache string) Result {
+// The go command uses its usual build cache, which is what makes a second
+// check fast: packages such as net/http are compiled once and reused.
+// Cancelling ctx stops the go command and ends the check early.
+func Run(ctx context.Context, step lesson.Step, source string) Result {
 	start := time.Now()
-	res := run(ctx, step, source, gocache)
+	res := run(ctx, step, source)
 	res.MS = time.Since(start).Milliseconds()
 	return res
 }
 
-func run(ctx context.Context, step lesson.Step, source, gocache string) Result {
+func run(ctx context.Context, step lesson.Step, source string) Result {
 	gobin, err := exec.LookPath("go")
 	if err != nil {
 		return Result{Stage: StageSetup, Output: "the go command was not found on PATH: " + err.Error()}
@@ -100,9 +98,6 @@ func run(ctx context.Context, step lesson.Step, source, gocache string) Result {
 	// the module into another workspace. GOFLAGS is cleared so the
 	// caller's own flags (such as -short or -mod) do not change the result.
 	env := append(os.Environ(), "GOWORK=off", "GOFLAGS=")
-	if gocache != "" {
-		env = append(env, "GOCACHE="+gocache)
-	}
 	var out []byte
 	for _, stage := range []string{StageVet, StageTest} {
 		cmdCtx, cancel := context.WithTimeout(ctx, Timeout)

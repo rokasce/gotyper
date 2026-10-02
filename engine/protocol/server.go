@@ -21,30 +21,23 @@ import (
 // being played. One Server serves one front end.
 type Server struct {
 	lib     lesson.Library
-	gocache string // GOCACHE for checks; see check.Run
 	greeted bool
 	session *judge.Session // nil until the first start
 
-	// background counts the goroutines running checks and pre-warms, so
-	// Serve can wait for them before it returns.
+	// background counts the goroutines running checks, so Serve can wait
+	// for them before it returns.
 	background sync.WaitGroup
 	// ctx is the context given to NewServer. Cancelling it stops every
-	// check and pre-warm still running and makes Serve return.
+	// check still running and makes Serve return.
 	ctx context.Context
-	// warmCtx is cancelled by stopWarm when the input ends, which stops a
-	// pre-warm that is still running: nobody is left to benefit from it.
-	warmCtx  context.Context
-	stopWarm context.CancelFunc
 }
 
-// NewServer returns a server that offers the steps in lib and runs checks
-// with gocache as the go build cache (empty: the go command's default).
-// Cancelling ctx stops the server: running checks and pre-warms are killed
-// (their temporary directories are still removed) and Serve returns. The
-// engine cancels it when it is told to stop with SIGTERM or an interrupt.
-func NewServer(ctx context.Context, lib lesson.Library, gocache string) *Server {
-	warmCtx, stopWarm := context.WithCancel(ctx)
-	return &Server{lib: lib, gocache: gocache, ctx: ctx, warmCtx: warmCtx, stopWarm: stopWarm}
+// NewServer returns a server that offers the steps in lib. Cancelling ctx
+// stops the server: running checks are killed (their temporary directories
+// are still removed) and Serve returns. The engine cancels it when it is
+// told to stop with SIGTERM or an interrupt.
+func NewServer(ctx context.Context, lib lesson.Library) *Server {
+	return &Server{lib: lib, ctx: ctx}
 }
 
 // readResult is one ReadBytes call's result, passed from Serve's reading
@@ -93,8 +86,8 @@ func (lw *lineWriter) failed() error {
 // or more. Serve runs it on a goroutine of its own and goes straight on to
 // the next request, so updates typed meanwhile are answered at once. That is
 // why a check's answer can come after the answers to later requests. When
-// the input ends, Serve stops any pre-warm and waits for the checks still
-// running, so every check is answered before it returns.
+// the input ends, Serve waits for the checks still running, so every check
+// is answered before it returns.
 //
 // When the server's context is cancelled, Serve returns nil at once without
 // waiting for more input; the checks still running are killed, and Serve
@@ -103,10 +96,7 @@ func (s *Server) Serve(r io.Reader, w io.Writer) error {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false) // keep < > & readable; this isn't HTML
 	out := &lineWriter{enc: enc}
-	defer func() {
-		s.stopWarm()
-		s.background.Wait()
-	}()
+	defer s.background.Wait()
 	// Reading blocks until a line arrives, and a cancelled context cannot
 	// interrupt a read. So reading happens on a goroutine of its own, and
 	// the loop below waits for either the next line or the cancellation.
@@ -209,7 +199,6 @@ func (s *Server) Handle(req Request) Response {
 				fmt.Sprintf("no step %q; send list to see the step ids", req.Step))
 		}
 		s.session = judge.NewSession(step)
-		s.prewarm(step)
 		return s.started(req)
 	case OpUpdate:
 		if s.session == nil {
@@ -257,25 +246,12 @@ func (s *Server) hello(req Request) Response {
 // goroutine while the server goes on to the next request, even if that
 // request starts a different step.
 func (s *Server) checkJob(req Request) func() Response {
-	ctx, step, gocache := s.ctx, s.session.Step(), s.gocache
+	ctx, step := s.ctx, s.session.Step()
 	source := strings.Join(req.Lines, "\n") + "\n" // a file ends in a newline
 	return func() Response {
-		res := check.Run(ctx, step, source, gocache)
+		res := check.Run(ctx, step, source)
 		return Response{ID: req.ID, Op: req.Op, Check: &res}
 	}
-}
-
-// prewarm checks the step's own target in the background and throws the
-// result away. The point is the side effect: the go command compiles the
-// packages the step imports (net/http and the rest) into the build cache, so
-// the learner's first check takes about a second instead of several. It is
-// stopped when the input ends.
-func (s *Server) prewarm(step lesson.Step) {
-	s.background.Add(1)
-	go func() {
-		defer s.background.Done()
-		check.Run(s.warmCtx, step, step.Source(), s.gocache)
-	}()
 }
 
 // started answers start and restart alike: the step's layout plus the render

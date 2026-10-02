@@ -82,8 +82,7 @@ step already in progress (if any) carries on untouched.
 
 The response carries `start` (the step's layout) and `render` (what to paint
 for an empty buffer, see `update`). A second `start` begins a step again from
-scratch. `start` also pre-warms the build cache for `check` in the
-background.
+scratch.
 
 ```json
 {"id":3,"op":"start",
@@ -186,17 +185,15 @@ itself is refused (`handshake_required`, `no_step`). Each go command is
 stopped after a minute, and the output then says so, so learner code that
 loops forever still gets an answer.
 
-The check uses a go build cache of its own, `gotyper/go-build` under the
-user's cache directory (`~/.cache` on Linux), so compiled packages are reused
-by later checks, even after the engine restarts. To make the first check
-fast as well, `start` pre-warms the cache: it checks the step's own target
-in the background and throws the result away. The first `go vet` + `go test`
-on an empty cache takes a few seconds; later ones take about one.
+The check uses the go command's usual build cache, so compiled packages are
+reused by later checks. The first `go vet` + `go test` on a cold cache takes
+a few seconds; later ones take about one.
 
 `check` never changes the session. The front end sends it for a type-along
 step once the text matches, and for a recall step when the learner submits.
 In a recall step a passing check is what completes the step; the front end
-decides that from `ok`.
+decides that from `ok`, and only if the buffer still holds the `lines` it
+sent.
 
 ## Ordering
 
@@ -213,7 +210,7 @@ A check grades the `lines` it was sent, against the step in progress when
 the engine read the request. A `start` or `restart` sent afterwards does not
 cancel it, so a front end that has moved on should ignore its answer. When
 stdin closes, the engine waits for running checks to answer before it
-exits, and stops a pre-warm still in progress.
+exits.
 
 ## Compatibility
 

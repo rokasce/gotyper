@@ -34,7 +34,7 @@ const (
 func serve(t *testing.T, input string) []Response {
 	t.Helper()
 	var out strings.Builder
-	if err := NewServer(context.Background(), lessons, "").Serve(strings.NewReader(input), &out); err != nil {
+	if err := NewServer(context.Background(), lessons).Serve(strings.NewReader(input), &out); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	var resps []Response
@@ -229,7 +229,7 @@ func TestStartWithoutIDPicksTheFirstStep(t *testing.T) {
 func TestStartWithNoLessons(t *testing.T) {
 	var out strings.Builder
 	in := hello + `{"id":2,"op":"start"}` + "\n" + `{"id":3,"op":"list"}` + "\n"
-	if err := NewServer(context.Background(), lesson.Library{}, "").Serve(strings.NewReader(in), &out); err != nil {
+	if err := NewServer(context.Background(), lesson.Library{}).Serve(strings.NewReader(in), &out); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
@@ -332,7 +332,7 @@ func TestCancelStopsChecksAndCleansUp(t *testing.T) {
 	in, feed := io.Pipe()
 	defer feed.Close()
 	served := make(chan error, 1)
-	go func() { served <- NewServer(ctx, lessons, t.TempDir()).Serve(in, io.Discard) }()
+	go func() { served <- NewServer(ctx, lessons).Serve(in, io.Discard) }()
 	go io.WriteString(feed, hello+
 		`{"id":2,"op":"start","step":"`+firstStep+`"}`+"\n"+
 		`{"id":3,"op":"check","lines":`+linesJSON(t, step.Target)+`}`+"\n")

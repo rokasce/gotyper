@@ -231,8 +231,15 @@ key("<Esc>")
 check(rq("nvim_buf_get_lines", s.buf, ret_row, ret_row + 1, false)[1] == "\t\treturn",
   "smartindent keeps the indentation of the line above")
 rq("nvim_command", "GotyperSubmit")
+-- Edit while the check runs: its pass is for the code as submitted, so it
+-- must not complete the step.
+rq("nvim_buf_set_lines", s.buf, -1, -1, false, { "// edited while checking" })
 s = wait(function(st) return not st.checking and st.check.ok end, 120000)
-check(s.done and s.panel_title == "step passed", "submitting the fixed code passes and completes the step")
+check(not s.done and s.panel_title == "check passed, code changed",
+  "a pass for code that changed meanwhile does not complete the step")
+rq("nvim_command", "GotyperSubmit")
+s = wait(function(st) return not st.checking and st.done end, 120000)
+check(s.check.ok and s.panel_title == "step passed", "submitting the fixed code passes and completes the step")
 check(lua("return vim.wo[require('gotyper').state().win].winbar"):find("[DONE]", 1, true) ~= nil, "winbar says DONE")
 rq("nvim_command", "tabclose")
 vim.uv.sleep(200)

@@ -41,7 +41,7 @@ func TestTargetPasses(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go vet and go test")
 	}
-	res := Run(context.Background(), demoStep, demoStep.Source(), "")
+	res := Run(context.Background(), demoStep, demoStep.Source())
 	if !res.OK || res.Stage != StageTest || !strings.HasPrefix(res.Output, "ok") {
 		t.Fatalf("the target should pass: %+v", res)
 	}
@@ -54,7 +54,7 @@ func TestForgottenReturnFailsTheTest(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go vet and go test")
 	}
-	res := Run(context.Background(), demoStep, without(t, "return"), "")
+	res := Run(context.Background(), demoStep, without(t, "return"))
 	if res.OK || res.Stage != StageTest || !strings.Contains(res.Output, "did you return?") {
 		t.Fatalf("want a go test failure asking about the return, got %+v", res)
 	}
@@ -64,7 +64,7 @@ func TestCompileErrorFailsVet(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go vet")
 	}
-	res := Run(context.Background(), demoStep, without(t, `"errors"`), "")
+	res := Run(context.Background(), demoStep, without(t, `"errors"`))
 	if res.OK || res.Stage != StageVet || !strings.Contains(res.Output, "handler.go") {
 		t.Fatalf("want a go vet failure naming handler.go, got %+v", res)
 	}

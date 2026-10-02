@@ -50,8 +50,7 @@ func TestLessonsOnDisk(t *testing.T) {
 						t.Errorf("target %s is not gofmt-formatted", step.File)
 					}
 				}
-				// An empty gocache uses the go command's usual cache.
-				if res := check.Run(context.Background(), step, step.Source(), ""); !res.OK {
+				if res := check.Run(context.Background(), step, step.Source()); !res.OK {
 					t.Fatalf("step %s: go %s failed:\n%s", step.ID, res.Stage, res.Output)
 				}
 			})

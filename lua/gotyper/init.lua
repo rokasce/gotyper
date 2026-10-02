@@ -83,11 +83,14 @@ local function update_winbar()
 end
 
 -- show_result shows a check result in the panel. A pass completes a recall
--- step. A type-along step is only checked once its text matches, so it is
--- already complete.
-local function show_result(c)
+-- step, but only if the buffer is still the code that was checked: `tick` is
+-- the buffer's changedtick when the check was sent, and the learner may have
+-- kept typing since. A type-along step is only checked once its text
+-- matches, so it is already complete.
+local function show_result(c, tick)
   S.check = c
-  if c.ok and S.recall and not S.done then
+  local changed = S.recall and vim.b[S.buf].changedtick ~= tick
+  if c.ok and S.recall and not S.done and not changed then
     S.done = true
     vim.cmd.stopinsert() -- the step is finished; stray keys should not edit it
   end
@@ -103,12 +106,15 @@ local function show_result(c)
   -- line per output line.
   vim.list_extend(lines, vim.split(c.output ~= "" and c.output or "(no output)", "\n"))
   lines[#lines + 1] = ""
-  if not c.ok and S.recall then
+  if changed then
+    lines[#lines + 1] = "The code changed since it was submitted; press " .. SUBMIT_KEY .. " to check it again."
+  elseif not c.ok and S.recall then
     lines[#lines + 1] = "Fix it and press " .. SUBMIT_KEY .. " to check again."
   else
     lines[#lines + 1] = "Press " .. RESTART_KEY .. " to do the step again."
   end
-  local title = c.ok and "step passed" or "check failed"
+  local title = changed and (c.ok and "check passed, code changed" or "check failed, code changed")
+    or c.ok and "step passed" or "check failed"
   S.panel_hidden = false -- the result is worth showing even if the intro was hidden
   show_panel(lines, title, c.ok and "GotyperPass" or "GotyperFail")
   update_winbar()
@@ -121,7 +127,7 @@ end
 local function run_check()
   if S.checking then return end -- one at a time; the panel already says it is running
   S.checking = true
-  local client, attempt = S.client, S.attempt
+  local client, attempt, tick = S.client, S.attempt, vim.b[S.buf].changedtick
   S.panel_hidden = false
   show_panel({ "Running go vet + go test..." }, "checking")
   update_winbar()
@@ -134,7 +140,7 @@ local function run_check()
       update_winbar()
       return vim.notify("gotyper engine: " .. resp.error.message, vim.log.levels.ERROR)
     end
-    show_result(resp.check)
+    show_result(resp.check, tick)
   end)
 end
 

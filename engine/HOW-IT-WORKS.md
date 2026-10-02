@@ -14,7 +14,7 @@ through the code and shows how to run the engine by hand.
 | `cmd/gotyper-engine/main.go` | Entry point. Parses flags, loads the lessons, then runs the protocol server on stdin/stdout. |
 | `cmd/gotyper-engine/selftest.go` | `--selftest`: lists the lessons, then plays the first step through the real protocol code and checks the results. |
 | `protocol/protocol.go` | The wire types (`Request`, `Response`, ...), the protocol version and the error codes. |
-| `protocol/server.go` | The NDJSON read loop (`Serve`) and the dispatcher (`Handle`). Keeps the lessons, the handshake flag and the current session, and runs checks and pre-warms in the background. |
+| `protocol/server.go` | The NDJSON read loop (`Serve`) and the dispatcher (`Handle`). Keeps the lessons, the handshake flag and the current session, and runs checks in the background. |
 | `judge/judge.go` | The result types the front end paints: `Span`, `Ghost`, `Stats`, `Render`. |
 | `judge/session.go` | The diff and the scoring: `Session.Update`, `Restart`, `Indents`. Recall steps skip the diff. |
 | `check/check.go` | `check.Run`: builds a step's module with a given version of its file and runs `go vet` and `go test` on it. |
@@ -154,8 +154,7 @@ and do the step's hidden tests pass?
    typed lines joined with newlines.
 4. **It runs `go vet ./...`, then `go test ./...`** in that directory, stopping
    at the first that fails. `GOWORK=off` and an empty `GOFLAGS` keep the
-   learner's environment from changing the result, and `GOCACHE` points at
-   gotyper's own build cache (`goCacheDir` in `cmd/gotyper-engine/main.go`).
+   learner's environment from changing the result.
    Each command is stopped after a minute, in case the learner's code loops
    forever. It is stopped with an interrupt, so the go command can remove its
    work directory; only if it is still running one second later is it
@@ -172,15 +171,14 @@ and do the step's hidden tests pass?
 
 Why the build cache matters: compiling `net/http` and its dependencies takes
 a few seconds; after that the go command reuses them and a check takes about
-one second. When a step starts, `prewarm` runs a check of the step's own
-target in the background just to fill the cache. When stdin closes, `Serve`
-cancels a pre-warm still running (through `warmCtx`) and waits for the
-checks still running, so they are answered. Neovim's `jobstop` also sends
-SIGTERM, which would end the engine before any cleanup ran, so `main` catches
-it with `signal.NotifyContext` and passes that context to `NewServer`. When
-it is cancelled, `Serve` returns without waiting for more input, the running
-checks and pre-warm are stopped the same way, and `check.Run` still removes their
-temporary directories.
+one second, so only the first check is slow.
+
+When stdin closes, `Serve` waits for the checks still running, so they are
+answered. Neovim's `jobstop` also sends SIGTERM, which would end the engine
+before any cleanup ran, so `main` catches it with `signal.NotifyContext` and
+passes that context to `NewServer`. When it is cancelled, `Serve` returns
+without waiting for more input, the running checks are stopped, and
+`check.Run` still removes their temporary directories.
 
 ## The Neovim side
 
@@ -238,6 +236,9 @@ What happens when a check runs:
 3. When the answer comes, `show_result()` fills the panel: PASS or FAIL, the
    stage that failed, the stats and the go output. In a recall step a pass
    marks the step done; a fail leaves the learner editing, to submit again.
+   `run_check()` remembers the buffer's `changedtick` when it sends the
+   check, and a pass for a buffer edited since then does not complete the
+   step: the panel says the code changed and asks for another submit.
 
 ## Run it and poke it by hand
 
