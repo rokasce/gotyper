@@ -1,5 +1,5 @@
 -- gotyper.ui paints what the engine says: ghost text, red mistakes, the stats
--- bar and the explanation panel. It decides nothing about right or wrong; the
+-- bar, the explanation panel and a drill's goal. It decides nothing about right or wrong; the
 -- engine's render (engine/PROTOCOL.md, "update") already holds every position.
 local M = {}
 
@@ -56,14 +56,18 @@ function M.paint(buf, render)
 end
 
 -- set_winbar shows the stats in the game window's own winbar (window-local, so
--- other windows keep theirs). A recall step has only keystrokes and time to
--- show: without a target there is no accuracy or line count. suffix is extra
--- text such as "[DONE]".
-function M.set_winbar(win, stats, recall, suffix)
+-- other windows keep theirs). info is the step layout from the engine's start
+-- answer, for the mode and a drill's par. A recall step has only keystrokes
+-- and time to show: without a target there is no accuracy or line count. A
+-- drill shows its keystrokes against par. suffix is extra text such as
+-- "[DONE]".
+function M.set_winbar(win, stats, info, suffix)
   if not api.nvim_win_is_valid(win) then return end
   local text
-  if recall then
+  if info.mode == "recall" then
     text = (" gotyper  recall  KEYS %d  %3.0fs%s"):format(stats.keys, stats.seconds, suffix or "")
+  elseif info.mode == "drill" then
+    text = (" gotyper  drill  KEYS %d/%d par  %3.0fs%s"):format(stats.keys, info.par, stats.seconds, suffix or "")
   else
     text = (" gotyper  WPM %3.0f  ACC %5.1f%%  KEYS %d  line %d/%d  errors %d  %3.0fs%s"):format(
       stats.wpm, stats.accuracy, stats.keys, stats.line, stats.lines, stats.errors, stats.seconds, suffix or "")
@@ -114,9 +118,28 @@ function M.show_panel(panel, win, code_width, lines, title, hl)
   return panel
 end
 
+-- show_goal opens a drill's goal, the code the learner edits the buffer
+-- into, in a read-only split below the game window `win`, and returns it as
+-- { win, buf }. The cursor stays in the game window. A split rather than a
+-- floating window, because the goal is as tall as the code and must not
+-- cover it; the explanation panel keeps floating over the game window.
+function M.show_goal(win, goal)
+  local buf = api.nvim_create_buf(false, true)
+  api.nvim_buf_set_lines(buf, 0, -1, false, goal)
+  local bo = vim.bo[buf]
+  bo.modifiable, bo.bufhidden, bo.tabstop = false, "wipe", 4
+  pcall(vim.treesitter.start, buf, "go") -- colour it like the game buffer
+  local gwin = api.nvim_open_win(buf, false, { split = "below", win = win, height = #goal })
+  local wo = vim.wo[gwin]
+  wo.wrap, wo.list, wo.spell, wo.number, wo.relativenumber = false, false, false, false, false
+  wo.winbar = "%#TabLine# goal: edit the buffer above until it matches this %#Normal#"
+  return { win = gwin, buf = buf }
+end
+
 -- stats_lines formats the engine's per-step bests (the `stats` op) as a
 -- table, one row per step, for show_stats. A recall step has no WPM or
--- accuracy (there is no target to compare against), so those show "-".
+-- accuracy (there is no target to compare against), and a drill is scored by
+-- keystrokes alone, so for both those show "-".
 local function stats_lines(steps)
   if #steps == 0 then return { "No step completed yet. Finish one with :Gotyper and it shows up here." } end
   local width = #"step"
@@ -124,13 +147,13 @@ local function stats_lines(steps)
   local row = "%-" .. width .. "s  %8s  %8s  %11s  %5s  %s"
   local lines = { row:format("step", "best WPM", "best acc", "fewest keys", "done", "last played") }
   for _, st in ipairs(steps) do
-    local recall = st.mode == "recall"
+    local no_wpm = st.mode == "recall" or st.mode == "drill"
     -- last_played is RFC 3339, "2026-10-01T10:00:00.123+03:00": keep the
     -- date and the hour and minute.
     local when = st.last_played:sub(1, 10) .. " " .. st.last_played:sub(12, 16)
     lines[#lines + 1] = row:format(st.step,
-      recall and "-" or ("%.0f"):format(st.best_wpm),
-      recall and "-" or ("%.1f%%"):format(st.best_accuracy),
+      no_wpm and "-" or ("%.0f"):format(st.best_wpm),
+      no_wpm and "-" or ("%.1f%%"):format(st.best_accuracy),
       st.fewest_keys, st.completions, when)
   end
   return lines

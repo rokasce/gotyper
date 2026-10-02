@@ -164,3 +164,48 @@ func TestStatsOp(t *testing.T) {
 		t.Fatalf("stats of an unreadable file = %+v", r)
 	}
 }
+
+// TestDrillStep plays a drill through the protocol: start opens with the
+// start file, the goal and the par; reaching the goal is done and records
+// the attempt once, without a check; restart begins at the start file again.
+func TestDrillStep(t *testing.T) {
+	const drill = "vim-drills/03-move-block"
+	step, ok := lessons.Step(drill)
+	if !ok {
+		t.Fatalf("%s is missing", drill)
+	}
+	path := filepath.Join(t.TempDir(), "stats.jsonl")
+	goal := Request{ID: new(int64(3)), Op: OpUpdate, Lines: step.Target, Keys: 9}
+	b, err := json.Marshal(goal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resps := serveStats(t, hello+
+		`{"id":2,"op":"start","step":"`+drill+`"}`+"\n"+
+		string(b)+"\n"+
+		string(b)+"\n"+ // done again: still one record
+		`{"id":4,"op":"restart"}`+"\n", path)
+	if len(resps) != 5 {
+		t.Fatalf("got %d responses, want 5", len(resps))
+	}
+	st, r := resps[1].Start, resps[1].Render
+	if st == nil || st.Mode != lesson.Drill || st.Par != step.Par || len(st.Buffer) != len(step.Start) || len(st.Goal) != len(step.Target) {
+		t.Fatalf("drill start = %+v", st)
+	}
+	if r == nil || r.Done || len(r.ErrorSpans) == 0 {
+		t.Fatalf("the start file should differ from the goal: %+v", r)
+	}
+	if r := resps[2].Render; r == nil || !r.Done || r.Stats.Keys != 9 {
+		t.Fatalf("goal update = %+v", r)
+	}
+	if st, r := resps[4].Start, resps[4].Render; st == nil || len(st.Buffer) != len(step.Start) || r == nil || r.Done || r.Stats.Keys != 0 {
+		t.Fatalf("restart = %+v, render %+v", st, r)
+	}
+	records, err := stats.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Step != drill || records[0].Mode != lesson.Drill || records[0].Keys != 9 || records[0].Check != "" {
+		t.Fatalf("records = %+v", records)
+	}
+}

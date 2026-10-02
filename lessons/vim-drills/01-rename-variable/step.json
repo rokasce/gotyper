@@ -1,0 +1,14 @@
+{
+  "title": "Drill 1 - rename a variable",
+  "mode": "drill",
+  "file": "goal.go",
+  "start": "start.go",
+  "par": 14,
+  "intro": [
+    "Rename `t` to `total` everywhere in `sum`. The goal is shown below the code.",
+    "",
+    "`*` searches for the word under the cursor, whole words only, so the `t` in `int` is safe. `cgn` changes the next match, and `.` repeats that change on the match after it, so one rename becomes a key per use.",
+    "",
+    "Par 14: `3j` `*` `cgn` `total` `<Esc>` `.` `.`"
+  ]
+}

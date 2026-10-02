@@ -7,7 +7,9 @@
 --   2. sends the whole buffer to the engine on every change ("update"),
 --   3. paints the answer (gotyper.ui): ghost text, red mistakes, stats,
 --   4. asks the engine to compile and test the buffer ("check") and shows
---      the result.
+--      the result,
+--   5. in a drill, opens the buffer with the drill's start text and shows
+--      the goal in a read-only split below it.
 --
 -- gotyper.engine owns the engine process and the wire protocol. This file
 -- owns the session: the game buffer, its keys and hooks, restart and teardown.
@@ -35,6 +37,8 @@ local ns_key = api.nvim_create_namespace("gotyper_keys")
 --   buf, win      the game buffer and the window showing it
 --   info          the step layout from the engine's start response
 --   recall        the step is a recall step (info.mode == "recall")
+--   drill         the step is a drill (info.mode == "drill")
+--   goal          the drill's goal window, see ui.show_goal
 --   last          the latest render that was painted
 --   keys          keystrokes in this attempt, sent with every update
 --   seq           id of the newest update sent; older answers are dropped
@@ -55,11 +59,12 @@ local ns_key = api.nvim_create_namespace("gotyper_keys")
 local S
 
 -- help_lines lists the game keys, for the bottom of the panel. Only a
--- recall step is submitted by hand.
+-- recall step is submitted by hand. A drill restarts from its start text.
 local function help_lines()
   local lines = { "" }
   if S.recall then lines[#lines + 1] = SUBMIT_KEY .. "  submit: go vet + go test" end
-  lines[#lines + 1] = RESTART_KEY .. "  restart the step    " .. PANEL_KEY .. "  hide/show this panel"
+  lines[#lines + 1] = RESTART_KEY .. (S.drill and "  start the drill again    " or "  restart the step    ")
+    .. PANEL_KEY .. "  hide/show this panel"
   return lines
 end
 
@@ -79,7 +84,7 @@ end
 -- the step is done.
 local function update_winbar()
   local suffix = S.checking and "  [checking...]" or S.done and "  [DONE]" or ""
-  ui.set_winbar(S.win, S.last.stats, S.recall, suffix)
+  ui.set_winbar(S.win, S.last.stats, S.info, suffix)
 end
 
 -- show_result shows a check result in the panel. A pass completes a recall
@@ -144,10 +149,28 @@ local function run_check()
   end)
 end
 
--- on_done runs when a type-along step becomes complete: leave insert mode so
--- stray keys do not edit the finished code, then compile and test it.
+-- show_drill_result shows a finished drill in the panel: the keystrokes it
+-- took against the drill's par. A drill is not compiled; reaching the goal
+-- is what finishes it.
+local function show_drill_result()
+  local keys, par = S.last.stats.keys, S.info.par
+  local verdict = keys < par and ("%d under par"):format(par - keys)
+    or keys == par and "on par" or ("%d over par"):format(keys - par)
+  S.panel_hidden = false -- the result is worth showing even if the intro was hidden
+  show_panel({
+    ("keystrokes %d   par %d   (%s)"):format(keys, par, verdict),
+    ("%.0fs"):format(S.last.stats.seconds),
+    "",
+    "Press " .. RESTART_KEY .. " to do the drill again.",
+  }, "drill done", "GotyperPass")
+end
+
+-- on_done runs when a type-along step or a drill becomes complete: leave
+-- insert mode so stray keys do not edit the finished code. A type-along
+-- step is then compiled and tested; a drill shows its keys against par.
 local function on_done()
   vim.cmd.stopinsert()
+  if S.drill then return show_drill_result() end
   run_check()
 end
 
@@ -155,8 +178,9 @@ end
 local function apply(render)
   ui.paint(S.buf, render)
   S.last = render
-  -- In a type-along step the engine says when the text matches. A recall
-  -- step's render is never done; a passing check completes it instead.
+  -- In a type-along step the engine says when the text matches, and in a
+  -- drill when the buffer equals the goal. A recall step's render is never
+  -- done; a passing check completes it instead.
   if not S.recall then
     local was_done = S.done
     S.done = render.done
@@ -258,23 +282,26 @@ local function open_game_buffer()
   return buf, win
 end
 
--- clear_buffer empties the game buffer without it counting as typing, and
--- without leaving the old attempt in the undo history.
-local function clear_buffer()
+-- reset_buffer replaces the game buffer's text with `lines` (empty, or a
+-- drill's start text) without it counting as typing, and without leaving the
+-- old attempt in the undo history.
+local function reset_buffer(lines)
   local ul = vim.bo[S.buf].undolevels
   vim.bo[S.buf].undolevels = -1 -- a change made with undolevels -1 cannot be undone
   S.clearing = true
-  api.nvim_buf_set_lines(S.buf, 0, -1, false, {})
+  api.nvim_buf_set_lines(S.buf, 0, -1, false, lines)
   S.clearing = false
   vim.bo[S.buf].undolevels = ul
 end
 
 -- begin_attempt resets the front end for a fresh attempt and paints the
--- engine's render of the empty buffer. Used by both start and restart, which
--- answer with the same shape (engine/PROTOCOL.md).
+-- engine's render of the buffer it begins with: empty, or a drill's start
+-- text. Used by both start and restart, which answer with the same shape
+-- (engine/PROTOCOL.md).
 local function begin_attempt(resp)
   S.info = resp.start
   S.recall = S.info.mode == "recall"
+  S.drill = S.info.mode == "drill"
   S.keys = 0 -- the protocol requires the key count to restart from 0
   S.seq = S.seq + 1 -- answers to updates sent before this point are stale
   S.attempt = S.attempt + 1 -- and so is the answer to a check still running
@@ -283,17 +310,24 @@ local function begin_attempt(resp)
   S.check = nil
   S.flush_pending = false
   S.restarting = false
-  -- A recall step's lines need not line up with the target's, so the
-  -- engine's per-line indentation would be wrong there. Neovim's
-  -- smartindent indents after a { and dedents on } instead.
+  -- In a recall step or a drill the lines need not line up with the
+  -- target's, so the engine's per-line indentation would be wrong there.
+  -- Neovim's smartindent indents after a { and dedents on } instead.
+  local free = S.recall or S.drill
   local bo = vim.bo[S.buf]
-  bo.indentexpr, bo.smartindent = S.recall and "" or INDENTEXPR, S.recall
-  clear_buffer()
+  bo.indentexpr, bo.smartindent = free and "" or INDENTEXPR, free
+  reset_buffer(S.drill and S.info.buffer or {})
+  -- The goal stays on show for the whole drill; a restart reuses it.
+  if S.drill and not (S.goal and api.nvim_win_is_valid(S.goal.win)) then
+    S.goal = ui.show_goal(S.win, S.info.goal)
+  end
   apply(resp.render)
   show_intro()
   if api.nvim_get_current_win() == S.win then
     api.nvim_win_set_cursor(S.win, { 1, 0 })
-    vim.cmd.startinsert()
+    -- A drill is played with vim's normal-mode commands, so it begins in
+    -- normal mode; the other modes begin with typing.
+    if S.drill then vim.cmd.stopinsert() else vim.cmd.startinsert() end
   end
 end
 
@@ -339,8 +373,10 @@ local function install_hooks()
     local function tidy()
       if not S or not api.nvim_win_is_valid(S.win) then return end
       for _, w in ipairs(api.nvim_tabpage_list_wins(api.nvim_win_get_tabpage(S.win))) do
-        -- relative == "" means a normal split, not a floating window like the panel
-        if w ~= S.win and api.nvim_win_get_config(w).relative == "" then pcall(api.nvim_win_close, w, true) end
+        -- relative == "" means a normal split, not a floating window like the
+        -- panel. A drill's goal split is gotyper's own, so it stays.
+        local goal = S.goal and S.goal.win
+        if w ~= S.win and w ~= goal and api.nvim_win_get_config(w).relative == "" then pcall(api.nvim_win_close, w, true) end
       end
     end
     local until_ms = vim.uv.now() + 2000
@@ -444,7 +480,8 @@ function M.start(step)
 end
 
 -- restart throws away the current attempt: the engine clears its error count
--- and timer, and the front end empties the buffer and its key count.
+-- and timer, and the front end empties the buffer (or, in a drill, puts the
+-- start text back) and resets its key count.
 function M.restart()
   if not (S and S.info) then
     return vim.notify("gotyper: no game is running; start one with :Gotyper", vim.log.levels.WARN)
@@ -472,6 +509,9 @@ end
 function M.submit()
   if not (S and S.info) then
     return vim.notify("gotyper: no game is running; start one with :Gotyper", vim.log.levels.WARN)
+  end
+  if S.drill then
+    return vim.notify("gotyper: a drill is done when the buffer matches the goal", vim.log.levels.INFO)
   end
   if not S.recall then
     return vim.notify("gotyper: type-along steps are checked automatically when finished", vim.log.levels.INFO)
@@ -506,8 +546,9 @@ function M.show_stats()
   ui.show_stats(steps)
 end
 
--- stop ends the session: remove our hooks, close the panel, stop the engine
--- and wipe the game buffer. Safe to call more than once.
+-- stop ends the session: remove our hooks, close the panel and a drill's
+-- goal, stop the engine and wipe the game buffer. Safe to call more than
+-- once.
 function M.stop()
   if not S then return end
   local s = S
@@ -515,6 +556,7 @@ function M.stop()
   vim.on_key(nil, ns_key)
   if s.augroup then pcall(api.nvim_del_augroup_by_id, s.augroup) end
   ui.close_panel(s.panel)
+  ui.close_panel(s.goal) -- the goal is a { win, buf } pair like the panel
   s.client.stop()
   if not s.wiping and api.nvim_buf_is_valid(s.buf) then pcall(api.nvim_buf_delete, s.buf, { force = true }) end
 end
@@ -527,6 +569,7 @@ function M.state()
     checking = S.checking, check = S.check,
     panel_open = S.panel ~= nil and api.nvim_win_is_valid(S.panel.win),
     panel_title = S.panel_content and S.panel_content.title,
+    goal_open = S.goal ~= nil and api.nvim_win_is_valid(S.goal.win),
   }
 end
 

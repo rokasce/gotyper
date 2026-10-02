@@ -95,12 +95,18 @@ func (s *Session) Width() int {
 // part of the target row lies past the end of the typed row becomes that row's
 // ghost, and target rows past the end of the buffer become ghost lines.
 //
-// In a recall step none of that happens: see recallUpdate.
+// In a recall step none of that happens: see recallUpdate. A drill step is
+// judged differently too: see drillUpdate.
 func (s *Session) Update(lines []string, keys int, cursor [2]int) Render {
 	t0 := time.Now()
 	r := Render{ErrorSpans: []Span{}, Ghosts: []Ghost{}, GhostLines: []string{}}
-	if s.step.Mode == lesson.Recall {
+	switch s.step.Mode {
+	case lesson.Recall:
 		r.Stats = s.recallUpdate(lines, keys)
+		r.ComputeUS = time.Since(t0).Microseconds()
+		return r
+	case lesson.Drill:
+		r.ErrorSpans, r.Done, r.Stats = s.drillUpdate(lines, keys)
 		r.ComputeUS = time.Since(t0).Microseconds()
 		return r
 	}
@@ -237,4 +243,97 @@ func (s *Session) recallUpdate(lines []string, keys int) Stats {
 		st.Seconds = s.now().Sub(s.started).Seconds()
 	}
 	return st
+}
+
+// drillUpdate is Update for a drill step. The buffer began as the step's
+// start file and the learner edits it towards the target, the goal, which
+// the front end shows beside it. It returns the spans to paint red, whether
+// the buffer equals the goal, and the stats.
+//
+// A drill moves and inserts whole lines, so rows are not compared by
+// position as in type-along: one inserted line would make every row below
+// it wrong. Instead matchLines lines the buffer up with the goal (see
+// align.go), and only the rows left unmatched are marked:
+//
+//   - The unmatched rows between two matched ones are a stretch the learner
+//     changed. Buffer and goal rows in the stretch are paired in order, and
+//     for each pair only the run of runes that differs is marked (diffRun),
+//     so a renamed variable marks just the name.
+//   - Buffer rows in the stretch with no goal row left to pair with are
+//     extra, and are marked whole. A blank extra row has nothing to mark.
+//   - Goal rows with no buffer row left are missing; there is nothing in
+//     the buffer to mark for them, and the goal on show tells the learner.
+//
+// Indentation is ignored, as in type-along: rows are compared with their
+// leading spaces and tabs stripped. The drill is done when the buffer has
+// the goal's rows, in order, and nothing else. No mistakes are charged and
+// there are no ghosts: in normal mode most keys move the cursor rather than
+// type, so the keystrokes, compared with the step's par, are the score.
+// Stats carries only Keys and Seconds. The clock starts at the first update
+// whose buffer differs from the start file, and stops when the drill is done.
+func (s *Session) drillUpdate(lines []string, keys int) ([]Span, bool, Stats) {
+	got := make([]string, len(lines))
+	offs := make([]int, len(lines)) // byte width of each row's indentation
+	for i, l := range lines {
+		got[i] = strings.TrimLeft(l, " \t")
+		offs[i] = len(l) - len(got[i])
+	}
+	match := matchLines(got, s.target)
+
+	spans := []Span{}
+	mark := func(row, col, end int) {
+		spans = append(spans, Span{row, offs[row] + col, offs[row] + end})
+	}
+	// Walk the buffer one stretch at a time. A stretch is the unmatched
+	// buffer rows [gi, gEnd) together with the unmatched goal rows
+	// [wi, wEnd) that lie between the same two matched rows.
+	gi, wi := 0, 0
+	for gi <= len(got) {
+		gEnd := gi
+		for gEnd < len(got) && match[gEnd] < 0 {
+			gEnd++
+		}
+		wEnd := len(s.target) // after the last matched row, the goal's rest
+		if gEnd < len(got) {
+			wEnd = match[gEnd]
+		}
+		for k := gi; k < gEnd; k++ {
+			if w := wi + (k - gi); w < wEnd {
+				if col, end, ok := diffRun(got[k], s.target[w]); ok {
+					mark(k, col, end)
+				}
+			} else if got[k] != "" {
+				mark(k, 0, len(got[k]))
+			}
+		}
+		// Step over the matched row that ends the stretch.
+		gi, wi = gEnd+1, wEnd+1
+	}
+
+	done := len(got) == len(s.target)
+	for i, m := range match {
+		if m != i {
+			done = false
+		}
+	}
+
+	changed := len(lines) != len(s.step.Start)
+	for i := 0; !changed && i < len(lines); i++ {
+		changed = lines[i] != s.step.Start[i]
+	}
+	if changed && s.started.IsZero() {
+		s.started = s.now()
+	}
+	if done && !s.started.IsZero() && s.ended.IsZero() {
+		s.ended = s.now()
+	}
+	st := Stats{Keys: keys}
+	if !s.started.IsZero() {
+		end := s.ended
+		if end.IsZero() {
+			end = s.now()
+		}
+		st.Seconds = end.Sub(s.started).Seconds()
+	}
+	return spans, done, st
 }

@@ -17,12 +17,13 @@ run the engine by hand.
 | `protocol/protocol.go` | The wire types (`Request`, `Response`, ...), the protocol version and the error codes. |
 | `protocol/server.go` | The NDJSON read loop (`Serve`) and the dispatcher (`Handle`). Keeps the lessons, the handshake flag and the current session, and runs checks in the background. |
 | `judge/judge.go` | The result types the front end paints: `Span`, `Ghost`, `Stats`, `Render`. |
-| `judge/session.go` | The diff and the scoring: `Session.Update`, `Restart`, `Indents`. Recall steps skip the diff. |
+| `judge/session.go` | The diff and the scoring: `Session.Update`, `Restart`, `Indents`. Recall steps skip the diff; drills use the alignment diff instead. |
+| `judge/align.go` | The drill's alignment diff: `matchLines` lines the buffer's rows up with the goal's, `diffRun` finds the differing run of a changed row. |
 | `check/check.go` | `check.Run`: builds a step's module with a given version of its file and runs `go vet` and `go test` on it. |
 | `stats/stats.go` | The stats file: `Record` (one completed step), `Append`, `Load` (skips damaged lines), `Bests` (per-step bests) and `DefaultPath`. |
 | `judge/text.go` | Tab helpers: indentation width and tab expansion. |
 | `lesson/lesson.go` | The `Step`, `Track` and `Library` types, and `Load`, which reads and validates the lessons directory. |
-| `lesson/lessons_test.go` | `TestLessonsOnDisk`: runs `check.Run` on every step's own target. |
+| `lesson/lessons_test.go` | `TestLessonsOnDisk`: runs `check.Run` on every step's own target, and checks that a drill's goal and start file are gofmt-clean. |
 | `PROTOCOL.md` | The wire schema. |
 | `../lessons/` | The lessons themselves. `../lessons/README.md` describes the format. |
 
@@ -75,7 +76,9 @@ test suite under the step's id.
 `list` answers with the loaded tracks and steps (id, title, mode).
 `start` with `"step":"json-api/01-greet-handler"` looks the id up in the
 library and creates a `judge.Session` for that step. A `start` without a step
-picks the first step of the first track.
+picks the first step of the first track. For a drill the answer also carries
+the start file (`buffer`), the goal and the par, and its render is the
+judgement of the start file rather than of an empty buffer.
 
 ## From a keystroke to a response
 
@@ -125,14 +128,39 @@ picks the first step of the first track.
 
 `restart` follows the same path. `Handle` calls `Session.Restart`, which clears
 the error count, the mistake history and the timer but keeps the step that
-`start` picked. The
-engine then replies with the step layout and the render of an empty buffer.
+`start` picked. The engine then replies with the step layout and the render
+of an empty buffer, or of the start file in a drill.
 
 In a **recall** step `Session.Update` skips steps 5 and 6. The learner writes
 from memory, so their rows need not line up with the target's, and a
 row-by-row diff would paint correct code red. It only starts the timer and
 reports the keystrokes and the time; there are no spans, ghosts or ghost
 lines, and `done` stays false. A passing check completes the step instead.
+
+In a **drill** `Session.Update` hands over to `drillUpdate`. The buffer
+began as the step's start file, and vim commands insert, delete and move
+whole lines, so comparing row n with row n (step 5) would mark everything
+below one inserted line wrong. Instead:
+
+1. **Line the rows up.** `matchLines` (`judge/align.go`) finds the longest
+   common subsequence of the buffer's rows and the goal's, indentation
+   stripped: the longest list of rows that appear in both, in the same
+   order. It fills a table where cell `[i][j]` holds the length of that
+   list for the rows from `i` and `j` onwards, working from the bottom
+   right, then walks it from the top left to read off which buffer row
+   matches which goal row. Every matched row is right, wherever it now sits.
+2. **Mark what is left over.** Between two matched rows, the unmatched
+   buffer rows and goal rows form a stretch the learner changed. They are
+   paired in order, and `diffRun` skips what each pair has in common at the
+   start and at the end, so renaming `t` to `tot` marks only the `ot`
+   still to fix, not the whole row. An unpaired buffer row is extra and is
+   marked whole; an unpaired goal row is missing, with nothing to mark.
+3. **Done and stats.** The drill is done when every buffer row matches the
+   goal row of the same number and there are no others. No mistakes are
+   charged (in normal mode most keys move the cursor), there are no ghosts,
+   and the stats are the keystrokes and the time, from the first change to
+   the start file until done. The plugin shows the keys against the step's
+   par.
 
 ## Checking the code
 
@@ -214,6 +242,13 @@ passes it to `NewServer`, and the tests pass a temporary file instead.
    fails, the error goes to stderr (the plugin shows it as a warning) and the
    check is still answered.
 
+A drill has no check, so it is recorded on its way through `update`
+instead: when `drillUpdate` says the buffer equals the goal, `Handle` asks
+`claimDrill` whether this attempt is recorded yet, and if not appends its
+line before it answers. Like a check, that happens once per attempt; a
+`start` or `restart` begins a new one. A drill's line has no `check` or
+`check_ms`.
+
 The `stats` op reads the file back. `stats.Load` decodes it line by line and
 skips any line that is not a valid record: a crash while appending can leave
 half a line at the end, and one bad line should not hide every other result.
@@ -231,8 +266,8 @@ answer.
 |---|---|
 | `plugin/gotyper.lua` | Defines `:Gotyper` (with completion of step ids), `:GotyperRestart`, `:GotyperPanel`, `:GotyperSubmit` and `:GotyperStats`. |
 | `lua/gotyper/engine.lua` | Builds this engine into `bin/` when its sources are newer than the binary, starts it as a job, and frames NDJSON requests and responses by `id`. Also asks a short-lived engine for `list` and `stats`. |
-| `lua/gotyper/init.lua` | The step picker and the session: the game tab and buffer, change tracking, key counting, auto-indent, restart, checks and their results, the panel toggle and teardown. Also `:GotyperStats`. |
-| `lua/gotyper/ui.lua` | Painting: error spans and ghosts as extmarks, ghost lines as virtual lines, the stats winbar, the panel and the stats window. |
+| `lua/gotyper/init.lua` | The step picker and the session: the game tab and buffer, change tracking, key counting, auto-indent, restart, checks and their results, drill results, the panel toggle and teardown. Also `:GotyperStats`. |
+| `lua/gotyper/ui.lua` | Painting: error spans and ghosts as extmarks, ghost lines as virtual lines, the stats winbar, the panel, a drill's goal split and the stats window. |
 | `test/run.sh`, `test/drive.lua` | End-to-end test: a real headless Neovim driven key by key over its RPC socket. |
 
 `:Gotyper` without a step id, and completing its argument, run a short-lived
@@ -280,6 +315,24 @@ What happens when a check runs:
    `run_check()` remembers the buffer's `changedtick` when it sends the
    check, and a pass for a buffer edited since then does not complete the
    step: the panel says the code changed and asks for another submit.
+
+What is different in a drill:
+
+1. `begin_attempt()` fills the buffer with the `buffer` lines from the start
+   answer (without making it undoable, as for a restart), opens the goal in
+   a read-only split below the game window (`ui.show_goal`) and leaves the
+   learner in normal mode. A split rather than another float, because the
+   goal is as tall as the code and a float would cover it.
+2. Every key is counted by the same `vim.on_key` hook as in the other
+   modes, motions included, and the winbar shows the count against par:
+   `KEYS 5/7 par`.
+3. When a render says `done`, `on_done()` leaves insert mode and shows the
+   result in the panel (keys, par and how far over or under) instead of
+   running a check. The engine has recorded the drill already.
+4. `<F5>` restarts as usual; the restart answer carries the start text
+   again, so the buffer goes back to it. The goal split stays open.
+   Closing the game window or its tab ends the session, and `stop()`
+   closes the goal split with it.
 
 `:GotyperStats` runs a short-lived engine, as the picker does, and sends it
 `hello` and `stats`. `ui.show_stats` lists the answer in a floating window,

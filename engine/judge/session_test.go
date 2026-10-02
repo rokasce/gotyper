@@ -198,3 +198,85 @@ func TestRecallShowsNothing(t *testing.T) {
 		t.Fatal("a recall step must not be done by update; a passing check completes it")
 	}
 }
+
+// drillStep is a small drill: the start file names a variable t, and the
+// goal renames it to total.
+var drillStep = lesson.Step{
+	ID:     "t/01-drill",
+	Mode:   lesson.Drill,
+	Par:    14,
+	Start:  []string{"func sum(nums []int) int {", "\tt := 0", "\tfor _, n := range nums {", "\t\tt += n", "\t}", "\treturn t", "}"},
+	Target: []string{"func sum(nums []int) int {", "\ttotal := 0", "\tfor _, n := range nums {", "\t\ttotal += n", "\t}", "\treturn total", "}"},
+}
+
+// goalWith returns the drill's goal with row i replaced by the given rows:
+// none to delete it, several to insert some.
+func goalWith(i int, rows ...string) []string {
+	out := append([]string(nil), drillStep.Target[:i]...)
+	out = append(out, rows...)
+	return append(out, drillStep.Target[i+1:]...)
+}
+
+// TestDrillInsertedLine: an extra line marks only that line, not every line
+// below it.
+func TestDrillInsertedLine(t *testing.T) {
+	s := NewSession(drillStep)
+	r := s.Update(goalWith(1, "\ttotal := 0", "\tx := 1"), 1, [2]int{})
+	if len(r.ErrorSpans) != 1 || r.ErrorSpans[0] != (Span{2, 1, 7}) || r.Done {
+		t.Fatalf("inserted line: spans=%+v done=%v", r.ErrorSpans, r.Done)
+	}
+}
+
+// TestDrillDeletedLine: a missing line leaves the rest unmarked; the buffer
+// has nothing to mark for it, and the drill is not done.
+func TestDrillDeletedLine(t *testing.T) {
+	s := NewSession(drillStep)
+	r := s.Update(goalWith(1), 1, [2]int{})
+	if len(r.ErrorSpans) != 0 || r.Done {
+		t.Fatalf("deleted line: spans=%+v done=%v", r.ErrorSpans, r.Done)
+	}
+}
+
+// TestDrillEditedLine: on a changed line only the differing run is marked,
+// and text that is only missing marks the rune where it is missing.
+func TestDrillEditedLine(t *testing.T) {
+	s := NewSession(drillStep)
+	r := s.Update(goalWith(3, "\t\ttotel += n"), 1, [2]int{})
+	// "\t\ttotel += n" against "total += n": only the "e" at byte 5 differs.
+	if len(r.ErrorSpans) != 1 || r.ErrorSpans[0] != (Span{3, 5, 6}) {
+		t.Fatalf("edited line: spans=%+v", r.ErrorSpans)
+	}
+	r = s.Update(goalWith(5, "\treturn tot"), 1, [2]int{})
+	if len(r.ErrorSpans) != 1 || r.ErrorSpans[0] != (Span{5, 10, 11}) {
+		t.Fatalf("shortened line: spans=%+v", r.ErrorSpans)
+	}
+}
+
+// TestDrillCompletion: the start file shows the renamed rows as differing,
+// the timer starts at the first change, and the drill is done, with the
+// timer stopped, when the buffer equals the goal (indentation aside).
+func TestDrillCompletion(t *testing.T) {
+	s := NewSession(drillStep)
+	now := time.Unix(0, 0)
+	s.now = func() time.Time { return now }
+
+	r := s.Update(drillStep.Start, 0, [2]int{})
+	if len(r.ErrorSpans) != 3 || r.ErrorSpans[0] != (Span{1, 2, 2 + len("t")}) || r.Done || r.Stats != (Stats{}) {
+		t.Fatalf("start file: spans=%+v done=%v stats=%+v", r.ErrorSpans, r.Done, r.Stats)
+	}
+	if len(r.Ghosts) != 0 || len(r.GhostLines) != 0 {
+		t.Fatalf("a drill shows no ghosts: %+v %v", r.Ghosts, r.GhostLines)
+	}
+	now = now.Add(time.Second)
+	s.Update(goalWith(1, "\ttotal := 0")[:2], 5, [2]int{}) // the first change starts the clock
+	now = now.Add(4 * time.Second)
+	goal := append([]string(nil), drillStep.Target...)
+	goal[3] = "    total += n" // spaces instead of tabs
+	if r = s.Update(goal, 14, [2]int{}); !r.Done || len(r.ErrorSpans) != 0 || r.Stats != (Stats{Keys: 14, Seconds: 4}) {
+		t.Fatalf("goal: done=%v spans=%+v stats=%+v", r.Done, r.ErrorSpans, r.Stats)
+	}
+	now = now.Add(time.Minute)
+	if r = s.Update(append(goal, "x"), 16, [2]int{}); r.Done || r.Stats.Seconds != 4 {
+		t.Fatalf("after done: done=%v stats=%+v", r.Done, r.Stats)
+	}
+}

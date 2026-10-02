@@ -14,6 +14,10 @@
 //	        main.go              *_test.go files that grade the step
 //	        handler_test.go
 //
+// A drill step instead holds step.json, the goal (its file) and the start
+// file the buffer begins with; it has no hidden files, because a drill is
+// judged by its text alone and never compiled.
+//
 // A step's Go module is its carried files (targets typed in earlier steps of
 // the same track), its own target and its hidden files, all in one
 // directory. Step.Module assembles it.
@@ -45,6 +49,11 @@ const (
 	// go vet and go test. The target is only the reference answer, used to
 	// check the lesson itself.
 	Recall Mode = "recall"
+	// Drill steps are vim refactor drills: the buffer opens holding the
+	// step's start file, the learner edits it with vim motions until it
+	// equals the target (the goal), and the keystrokes are compared with
+	// the step's par. Drills are not compiled or tested.
+	Drill Mode = "drill"
 )
 
 // MetaFile is the name of the metadata file in every step directory.
@@ -72,6 +81,12 @@ type Step struct {
 	// "handler.go".
 	File   string
 	Target []string
+	// Start is what the buffer holds when a drill begins, as lines; it is
+	// nil for other modes.
+	Start []string
+	// Par is the keystroke count of a good way to do a drill, for the
+	// learner to measure their keystrokes against; 0 for other modes.
+	Par int
 	// Carried maps a file name to its contents for every target carried
 	// from an earlier step of the same track.
 	Carried map[string]string
@@ -253,6 +268,10 @@ type meta struct {
 	// Carry lists earlier steps of the same track, by directory name,
 	// whose targets are copied into this step's module.
 	Carry []string `json:"carry"`
+	// StartFile and Par are for drills only: the file the buffer starts
+	// with, next to the target, and the keystroke count to beat.
+	StartFile string `json:"start"`
+	Par       int    `json:"par"`
 }
 
 // loadStep reads and validates one step directory. dir is its path inside
@@ -279,17 +298,17 @@ func loadStep(fsys fs.FS, dir, id string, earlier map[string]Step, failed map[st
 		fail("%s: title is empty", MetaFile)
 	}
 	switch m.Mode {
-	case TypeAlong, Recall:
+	case TypeAlong, Recall, Drill:
 	case "":
-		fail("%s: mode is missing; use %q or %q", MetaFile, TypeAlong, Recall)
+		fail("%s: mode is missing; use %q, %q or %q", MetaFile, TypeAlong, Recall, Drill)
 	default:
-		fail("%s: unknown mode %q; use %q or %q", MetaFile, m.Mode, TypeAlong, Recall)
+		fail("%s: unknown mode %q; use %q, %q or %q", MetaFile, m.Mode, TypeAlong, Recall, Drill)
 	}
 
 	if m.Intro == nil {
 		m.Intro = []string{} // so the protocol sends [] rather than null
 	}
-	step := Step{ID: id, Title: m.Title, Intro: m.Intro, Mode: m.Mode, File: m.File,
+	step := Step{ID: id, Title: m.Title, Intro: m.Intro, Mode: m.Mode, File: m.File, Par: m.Par,
 		Carried: map[string]string{}, Hidden: map[string]string{}}
 	// from records where each module file came from, to report two sources
 	// writing the same path.
@@ -313,6 +332,33 @@ func loadStep(fsys fs.FS, dir, id string, earlier map[string]Step, failed map[st
 		}
 	}
 
+	// A drill needs a start file and a par; no other mode uses either.
+	if m.Mode == Drill {
+		switch {
+		case m.StartFile == "":
+			fail("%s: start is missing; a drill names the file its buffer starts with", MetaFile)
+		case m.StartFile != path.Base(m.StartFile) || m.StartFile == MetaFile || m.StartFile == HiddenDir || m.StartFile == m.File ||
+			m.StartFile == "." || m.StartFile == "..":
+			fail("%s: start %q must be a plain file name in the step directory, other than file", MetaFile, m.StartFile)
+		default:
+			src, err := fs.ReadFile(fsys, path.Join(dir, m.StartFile))
+			if err != nil {
+				fail("start file %s is missing", m.StartFile)
+			} else {
+				step.Start = splitLines(string(src))
+			}
+		}
+		if m.Par <= 0 {
+			fail("%s: par must be a keystroke count above 0", MetaFile)
+		}
+		// Drills are never compiled, so there is no module to add to.
+		if len(m.Carry) > 0 {
+			fail("%s: a drill is not compiled, so it cannot carry", MetaFile)
+		}
+	} else if m.StartFile != "" || m.Par != 0 {
+		fail("%s: start and par are for drills only", MetaFile)
+	}
+
 	// Anything else in the step directory is a mistake, most likely a file
 	// that was meant to go under hidden/ or a target with the wrong name.
 	entries, err := fs.ReadDir(fsys, dir)
@@ -322,9 +368,14 @@ func loadStep(fsys fs.FS, dir, id string, earlier map[string]Step, failed map[st
 	for _, e := range entries {
 		switch name := e.Name(); {
 		case name == MetaFile || name == m.File:
-		case name == HiddenDir && e.IsDir():
+		case m.Mode == Drill && name == m.StartFile:
+		case name == HiddenDir && e.IsDir() && m.Mode != Drill:
 		default:
-			fail("unexpected %s; hidden files go under %s/", name, HiddenDir)
+			if m.Mode == Drill {
+				fail("unexpected %s; a drill holds only %s, its file and its start file", name, MetaFile)
+			} else {
+				fail("unexpected %s; hidden files go under %s/", name, HiddenDir)
+			}
 		}
 	}
 

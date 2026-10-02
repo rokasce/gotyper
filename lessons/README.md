@@ -36,14 +36,16 @@ A step's id is `<track>/<step directory>`, for example
 | Field | Required | Meaning |
 |---|---|---|
 | `title` | yes | Shown above the intro. |
-| `mode` | yes | How the step is played: `type-along` or `recall` (below). |
+| `mode` | yes | How the step is played: `type-along`, `recall` or `drill` (below). |
 | `file` | yes | The target's file name. It must sit next to `step.json`. |
 | `intro` | no | The explanation shown beside the code, as a list of markdown lines. JSON has no multi-line strings, so each line is one list item. |
-| `carry` | no | Earlier steps of this track, by directory name, whose targets this step's module includes. |
+| `carry` | no | Earlier steps of this track, by directory name, whose targets this step's module includes. Not for drills. |
+| `start` | drills only | The file the drill's buffer starts with. It must sit next to `step.json`, under another name than `file`. |
+| `par` | drills only | A keystroke count above 0: the keys of a good way to do the drill, which the learner's keys are shown against. |
 
 Unknown fields are an error, so a misspelling doesn't go unnoticed.
 
-The two modes:
+The three modes:
 
 - **`type-along`**: the learner types over the target shown as ghost text,
   and the step is done when every line matches. The game then runs `go vet`
@@ -55,6 +57,11 @@ The two modes:
   the hidden tests are all that grade a recall step, they must pin down the
   behaviour the intro asks for. The intro should say what to write, since
   there is no ghost text to follow.
+- **`drill`**: a vim refactor drill. The buffer opens holding the `start`
+  file, the target (the goal) is shown below it, and the learner edits the
+  buffer with vim commands until it equals the goal (indentation aside).
+  The score is the keystrokes against `par`. Set `par` by counting a
+  reasonable way to do it, and show that way in the intro as a hint.
 
 A recall step usually repeats an earlier type-along step's file. It is a
 step of its own, with its own copy of the target and hidden files, so it
@@ -62,6 +69,19 @@ does not carry the step it recalls (that file would clash with its target).
 
 The step directory holds only `step.json`, the target and `hidden/`. Any
 other file there is an error.
+
+A drill is judged by its text alone, so it has no `hidden/` and is never
+compiled. Its directory holds only `step.json`, the target and the start
+file:
+
+```
+lessons/
+  vim-drills/
+    01-rename-variable/
+      step.json                {"mode": "drill", "file": "goal.go", "start": "start.go", "par": 14, ...}
+      goal.go                  the target: what the buffer must become
+      start.go                 what the buffer holds when the drill begins
+```
 
 ## The step's module
 
@@ -91,5 +111,6 @@ go test ./lesson -run TestLessonsOnDisk -v
 For every step this assembles the module in a temporary directory and runs
 `go vet ./...` and `go test ./...` on it, with the same code (`engine/check`)
 that checks the learner's work in the game. It also checks that a Go target is
-gofmt-formatted, because the learner should type canonical code. A failure
-names the step id.
+gofmt-formatted, because the learner should type canonical code. Drills are
+not compiled: for a drill it only checks that the target and the start file
+are valid, gofmt-formatted Go. A failure names the step id.

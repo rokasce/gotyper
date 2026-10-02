@@ -35,7 +35,8 @@ type Record struct {
 	// WPM, Accuracy, Keys, Errors and Seconds are the attempt's final
 	// stats, as the update op reported them (judge.Stats). In a recall
 	// step WPM and Accuracy are 0, because there is no target to compare
-	// against.
+	// against; in a drill step they and Errors are 0, because a drill is
+	// scored by its keystrokes alone.
 	WPM      float64 `json:"wpm"`
 	Accuracy float64 `json:"accuracy"`
 	Keys     int     `json:"keys"`
@@ -43,9 +44,10 @@ type Record struct {
 	Seconds  float64 `json:"seconds"`
 	// Check is the result of the check that completed the step. Only a
 	// passing check completes a step, so it is always "pass"; CheckMS is
-	// how long that check took.
-	Check   string `json:"check"`
-	CheckMS int64  `json:"check_ms"`
+	// how long that check took. A drill is completed by reaching its goal,
+	// with no check, so its record leaves both out.
+	Check   string `json:"check,omitempty"`
+	CheckMS int64  `json:"check_ms,omitempty"`
 	// Time is when the step was completed.
 	Time time.Time `json:"time"`
 }
