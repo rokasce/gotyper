@@ -122,6 +122,41 @@ the error count, the mistake history and the timer but keeps the step that
 `start` picked. The
 engine then replies with the step layout and the render of an empty buffer.
 
+## The Neovim side
+
+The plugin lives outside this directory, in `plugin/` and `lua/gotyper/` at the
+repository root. It holds no judging logic; it sends the buffer and paints the
+answer.
+
+| File | Role |
+|---|---|
+| `plugin/gotyper.lua` | Defines `:Gotyper`, `:GotyperRestart` and `:GotyperPanel`. |
+| `lua/gotyper/engine.lua` | Builds this engine into `bin/` when its sources are newer than the binary, starts it as a job, and frames NDJSON requests and responses by `id`. |
+| `lua/gotyper/init.lua` | The session: the game tab and buffer, change tracking, key counting, auto-indent, restart, the panel toggle and teardown. |
+| `lua/gotyper/ui.lua` | Painting: error spans and ghosts as extmarks, ghost lines as virtual lines, the stats winbar and the explanation panel. |
+| `test/run.sh`, `test/drive.lua` | End-to-end test: a real headless Neovim driven key by key over its RPC socket. |
+
+Starting a game sends `hello` first. If the engine answers `version_mismatch`,
+the plugin closes the game tab and shows the engine's message. Otherwise it
+sends `start` and paints the returned `render`.
+
+On every buffer change Neovim calls the plugin's `on_lines` hook. The plugin
+schedules one `update` for when Neovim is next idle, so a paste or a `dd` sends
+one request, not one per line. Each update gets a new `id`. An answer whose `id`
+is older than the newest update sent is dropped, because a newer buffer state is
+already on its way.
+
+What happens when the learner presses the restart key (`<F5>`):
+
+1. `vim.on_key` counts the key, like every key pressed in the game buffer.
+2. The buffer-local mapping calls `restart()` in `lua/gotyper/init.lua`. It
+   marks every update still in flight as stale and sends `{"op":"restart"}`.
+3. The engine clears the attempt (`Session.Restart`) and answers with the step
+   layout and the render of an empty buffer.
+4. The plugin empties the buffer without making it undoable, sets its key count
+   back to 0 as the protocol requires, paints the render (ghost text again, no
+   red) and puts the learner back in insert mode on the first line.
+
 ## Run it and poke it by hand
 
 From the `engine/` directory:
