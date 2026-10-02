@@ -206,8 +206,8 @@ passes it to `NewServer`, and the tests pass a temporary file instead.
    retyping the last character of a type-along step) adds nothing. A
    restart while the check runs, or an edit to a recall step meanwhile,
    leaves nothing behind: the learner gave that attempt up, or is no longer
-   at the code that passed. The plugin applies
-   the same rule when it decides whether a recall step is done.
+   at the code that passed. The plugin applies the same rule when it
+   decides whether a recall step is done.
 4. **`stats.Append` writes one line.** The file is JSON Lines, like the
    protocol: one JSON object per line. It opens the file with `O_APPEND`, so
    it only ever adds to the end and never rewrites old lines. If writing
