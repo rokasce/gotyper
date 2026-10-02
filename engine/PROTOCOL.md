@@ -207,7 +207,10 @@ passes and:
 - and in both, the attempt is still going when the check finishes: no
   `start` or `restart` came in meanwhile, and the latest `update` sent the
   same `lines` as the check. A pass for code the learner has edited since,
-  or for an attempt they threw away, is not recorded.
+  or for an attempt they threw away, is not recorded;
+- and the attempt is not recorded yet. An attempt is recorded at most once,
+  however many of its checks pass; the next `start` or `restart` begins a
+  new attempt that can be recorded again.
 
 Restarted or abandoned attempts therefore leave nothing in the file. Each
 line is one JSON object:

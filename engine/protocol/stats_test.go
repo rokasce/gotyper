@@ -64,6 +64,38 @@ func TestCompletedStepIsRecorded(t *testing.T) {
 	}
 }
 
+// TestAttemptIsRecordedOnce checks a completed attempt twice, as a second
+// F6 or retyping the last character would: both checks pass, but the
+// attempt adds one record.
+func TestAttemptIsRecordedOnce(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go vet and go test")
+	}
+	path := filepath.Join(t.TempDir(), "stats.jsonl")
+	step, _ := lessons.Step(firstStep)
+	check := func(id string) string {
+		return `{"id":` + id + `,"op":"check","lines":` + linesJSON(t, step.Target) + `}` + "\n"
+	}
+	resps := serveStats(t, hello+
+		`{"id":2,"op":"start","step":"`+firstStep+`"}`+"\n"+
+		typeAll(t, 3, step)+check("4")+check("5"), path)
+	if len(resps) != 5 {
+		t.Fatalf("got %d responses, want 5", len(resps))
+	}
+	for _, r := range resps {
+		if r.Error != nil || r.Op == OpCheck && !r.Check.OK {
+			t.Fatalf("response %d = %+v (check %+v); every check should pass", id(r), r, r.Check)
+		}
+	}
+	records, err := stats.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("got %d records, want 1: %+v", len(records), records)
+	}
+}
+
 // TestAbandonedAttemptsAreNotRecorded sends checks that pass but complete
 // nothing: one for an attempt restarted while it ran, one for a recall step
 // edited while it ran, and one for a type-along step whose text was never

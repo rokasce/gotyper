@@ -33,14 +33,19 @@ type Server struct {
 	// statsPath is the stats file that completed steps are added to.
 	statsPath string
 
-	// mu guards attempt and lines, which a check's goroutine reads when it
-	// finishes to decide whether the attempt it checked is still going.
+	// mu guards attempt, lines and recorded, which a check's goroutine
+	// reads when it finishes to decide whether to record the attempt it
+	// checked.
 	mu sync.Mutex
 	// attempt counts start and restart requests, so each attempt has its
 	// own number.
 	attempt int
 	// lines is the buffer from the latest update in this attempt.
 	lines []string
+	// recorded is whether this attempt is already in the stats file, so
+	// checking it again (another F6, or retyping the last character of a
+	// type-along step) does not count it twice.
+	recorded bool
 
 	// background counts the goroutines running checks, so Serve can wait
 	// for them before it returns.
@@ -273,7 +278,7 @@ func (s *Server) hello(req Request) Response {
 // handling requests: the step being played, the lines to check, the attempt
 // and its latest stats. It returns a function that runs the check, records
 // the step in the stats file if the check completed it, and builds the
-// response. Apart from reading attempt and lines under mu, that function
+// response. Apart from claiming the record under mu, that function
 // touches no Server state, so it is safe to run on another goroutine while
 // the server goes on to the next request, even if that request starts a
 // different step.
@@ -284,7 +289,8 @@ func (s *Server) hello(req Request) Response {
 // when the check finishes, with the buffer still holding the checked lines:
 // after a start or restart the attempt was given up, and after an edit the
 // learner is no longer at the code that passed (the front end then asks
-// them to submit again, see PROTOCOL.md).
+// them to submit again, see PROTOCOL.md). An attempt is recorded at most
+// once, however many of its checks pass.
 func (s *Server) checkJob(req Request) func() Response {
 	ctx, step, stat := s.ctx, s.session.Step(), s.last.Stats
 	complete := step.Mode == lesson.Recall || s.last.Done
@@ -292,7 +298,7 @@ func (s *Server) checkJob(req Request) func() Response {
 	source := strings.Join(req.Lines, "\n") + "\n" // a file ends in a newline
 	return func() Response {
 		res := check.Run(ctx, step, source)
-		if res.OK && complete && s.stillAt(attempt, req.Lines) {
+		if res.OK && complete && s.claimRecord(attempt, req.Lines) {
 			rec := stats.Record{
 				Step: step.ID, Mode: step.Mode,
 				WPM: stat.WPM, Accuracy: stat.Accuracy, Keys: stat.Keys, Errors: stat.Errors, Seconds: stat.Seconds,
@@ -309,12 +315,18 @@ func (s *Server) checkJob(req Request) func() Response {
 	}
 }
 
-// stillAt reports whether attempt is still the current attempt and the
-// latest update's buffer is lines. It may be called from any goroutine.
-func (s *Server) stillAt(attempt int, lines []string) bool {
+// claimRecord reports whether a check of attempt with lines should be
+// recorded: attempt is still the current attempt, the latest update's
+// buffer is lines, and the attempt is not recorded yet. If so it marks the
+// attempt recorded. It may be called from any goroutine.
+func (s *Server) claimRecord(attempt int, lines []string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.attempt == attempt && slices.Equal(s.lines, lines)
+	if s.attempt != attempt || !slices.Equal(s.lines, lines) || s.recorded {
+		return false
+	}
+	s.recorded = true
+	return true
 }
 
 // started answers start and restart alike: the step's layout plus the render
@@ -324,6 +336,7 @@ func (s *Server) started(req Request) Response {
 	s.mu.Lock()
 	s.attempt++ // a check of the previous attempt no longer completes it
 	s.lines = []string{""}
+	s.recorded = false
 	s.mu.Unlock()
 	s.last = s.session.Update(s.lines, 0, [2]int{})
 	render := s.last

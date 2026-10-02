@@ -192,16 +192,21 @@ passes it to `NewServer`, and the tests pass a temporary file instead.
 
 1. **Remembering the attempt.** The server keeps the latest render it sent
    (`last`), and under a mutex the attempt number (`attempt`, increased by
-   every `start` and `restart`) and the latest update's buffer (`lines`).
+   every `start` and `restart`), the latest update's buffer (`lines`) and
+   whether this attempt is already recorded (`recorded`, cleared by `start`
+   and `restart`).
 2. **When a check is sent**, `checkJob` notes, on the request goroutine,
    whether the attempt is complete if the check passes: always in a recall
    step, and in a type-along step only if `last.Done`. It also notes the
    stats from `last` and the attempt number.
 3. **When the check finishes**, on its own goroutine, it records the step
-   only if it passed and `stillAt` says the same attempt is still going with
-   the same buffer. That is why a restart while the check runs, or an edit
-   to a recall step meanwhile, leaves nothing behind: the learner gave that
-   attempt up, or is no longer at the code that passed. The plugin applies
+   only if it passed and `claimRecord` says the same attempt is still going
+   with the same buffer and is not recorded yet; `claimRecord` then marks it
+   recorded, so a second passing check of the attempt (another F6, or
+   retyping the last character of a type-along step) adds nothing. A
+   restart while the check runs, or an edit to a recall step meanwhile,
+   leaves nothing behind: the learner gave that attempt up, or is no longer
+   at the code that passed. The plugin applies
    the same rule when it decides whether a recall step is done.
 4. **`stats.Append` writes one line.** The file is JSON Lines, like the
    protocol: one JSON object per line. It opens the file with `O_APPEND`, so
