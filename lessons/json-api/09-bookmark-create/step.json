@@ -1,0 +1,24 @@
+{
+  "title": "Step 9 - creating a bookmark from a JSON body",
+  "mode": "type-along",
+  "file": "create.go",
+  "intro": [
+    "`create` answers `POST /bookmarks`, which step 7's",
+    "routes already send to it. It replaces the placeholder.",
+    "",
+    "`json.NewDecoder(r.Body)` reads the JSON straight from",
+    "the request. By default a field the struct doesn't have",
+    "is silently dropped; `DisallowUnknownFields` makes it an",
+    "error, so a client's typo is reported instead of lost.",
+    "",
+    "Never trust input. `url.Parse` accepts almost anything,",
+    "even an empty string, so check that the result has an",
+    "http or https scheme and a host. Bad input gets 400 and",
+    "a short message; nothing is stored.",
+    "",
+    "Success is 201 Created with the stored bookmark, which",
+    "now has its id. `WriteHeader` must come after setting",
+    "headers and before the body."
+  ],
+  "carry": ["03-bookmark-type", "05-bookmark-store", "07-bookmark-routes"]
+}
