@@ -25,7 +25,9 @@ type Ghost struct {
 	Text string `json:"text"`
 }
 
-// Stats is the scoreboard for the current attempt.
+// Stats is the scoreboard for the current attempt. In a recall step only Keys
+// and Seconds are filled in; with no target to compare against, the rest has
+// no meaning and stays 0.
 type Stats struct {
 	// WPM is words per minute: correct characters / 5 / minutes elapsed.
 	// It stays 0 for the first second so a single fast key doesn't show
@@ -64,8 +66,9 @@ type Render struct {
 	GhostLines []string `json:"ghost_lines"`
 	Stats      Stats    `json:"stats"`
 	// Done reports whether the attempt has met the step's completion
-	// condition. For the type-along steps that exist today, that means every
-	// line matches the target exactly (indentation aside).
+	// condition. For a type-along step, that means every line matches the
+	// target exactly (indentation aside). For a recall step it is always
+	// false: a passing check completes it instead.
 	Done bool `json:"done"`
 	// ComputeUS is how long the judge took, in microseconds, so the front
 	// end can tell judging time apart from bridge and paint time.

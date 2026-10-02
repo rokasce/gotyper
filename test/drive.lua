@@ -95,6 +95,14 @@ key("<F2>")
 s = wait(function(st) return st.panel_open end, 5000)
 check(s.panel_open, "<F2> shows it again")
 check(s.keys == 7, "the panel key is not counted as typing")
+-- <F6> submits recall steps only; a type-along step is checked by itself
+-- when its text matches, so here it runs no check.
+key("<F6>")
+vim.uv.sleep(300)
+s = state()
+check(not s.checking and s.check == nil and s.panel_title ~= "checking",
+  "<F6> runs no check in a type-along step")
+check(s.keys == 7 and rq("nvim_get_mode").mode == "i", "and the learner goes on typing")
 
 -- 4. Restart throws the attempt away: empty buffer, no red, counts back to 0.
 key("<F5>")
@@ -138,6 +146,10 @@ local buf = rq("nvim_buf_get_lines", s.buf, 0, -1, false)
 check(buf[14] == target[14] and buf[15] == target[15], "auto-indent inserted real tabs (" .. vim.inspect(buf[15]) .. ")")
 check(s.last.done and s.last.stats.errors == 0 and s.last.stats.line == #target, "the engine reports the step done")
 check(rq("nvim_get_mode").mode == "n", "done leaves insert mode")
+-- Finishing a type-along step runs the check (go vet + go test) by itself.
+s = wait(function(st) return st.check ~= nil and not st.checking end, 120000)
+check(s.check.ok and s.panel_title == "step passed",
+  ("finishing runs go vet + go test, and it passes (%dms: %s)"):format(s.check.ms, s.check.output))
 check(lua("return vim.wo[require('gotyper').state().win].winbar"):find("[DONE]", 1, true) ~= nil, "winbar says DONE")
 print(("stats: wpm=%.1f acc=%.1f%% keys=%d"):format(s.last.stats.wpm, s.last.stats.accuracy, s.last.stats.keys))
 
@@ -177,7 +189,63 @@ rq("nvim_command", "tabclose")
 vim.uv.sleep(200)
 check(state() == nil, "(closed it again)")
 
--- 8. A front end speaking another protocol version gets a clear message.
+-- 8. A recall step: no ghost text, no red, and <F6> submits what was written.
+--    It is started the way the learner starts any step: from the picker.
+lua([[
+  for _, step in ipairs(_G.gotyper_pick.items) do
+    if step.id == 'json-api/02-greet-handler-recall' then return _G.gotyper_choose(step) end
+  end
+]])
+s = wait(function(st) return st.info ~= nil and st.last ~= nil end)
+check(s.info.mode == "recall", "the recall step starts")
+check(marks().ghost == 0 and marks().vlines == 0, "a recall step shows no ghost text")
+type_text("packx")
+s = wait(function(st) return st.last.stats.keys >= 5 end, 5000)
+m = marks()
+check(m.err == 0 and m.ghost == 0 and #s.last.error_spans == 0, "and nothing turns red")
+check(lua("return vim.wo[require('gotyper').state().win].winbar"):find("recall  KEYS 5", 1, true) ~= nil,
+  "winbar shows the keystrokes")
+-- Write the handler but forget the return after http.Error: it compiles,
+-- and the hidden test catches it.
+local forgot, ret_row = {}, nil
+for i, l in ipairs(target) do
+  if l == "\t\treturn" then
+    ret_row = i - 1 -- the line before it, 1-based, in the buffer without it
+  else
+    forgot[#forgot + 1] = l
+  end
+end
+rq("nvim_buf_set_lines", s.buf, 0, -1, false, forgot)
+key("<F6>")
+s = wait(function(st) return st.check ~= nil and not st.checking end, 120000)
+check(not s.check.ok and s.check.stage == "test" and s.check.output:find("did you return?", 1, true) ~= nil,
+  "submitting without the return fails go test")
+check(not s.done and s.panel_title == "check failed" and s.panel_open, "the failure is shown and the step goes on")
+check(rq("nvim_get_mode").mode == "i", "the learner can keep editing")
+-- Fix it with ordinary vim editing, then submit again.
+key("<Esc>")
+rq("nvim_win_set_cursor", s.win, { ret_row, 0 })
+key("o")
+type_text("return")
+key("<Esc>")
+check(rq("nvim_buf_get_lines", s.buf, ret_row, ret_row + 1, false)[1] == "\t\treturn",
+  "smartindent keeps the indentation of the line above")
+rq("nvim_command", "GotyperSubmit")
+-- Edit while the check runs: its pass is for the code as submitted, so it
+-- must not complete the step.
+rq("nvim_buf_set_lines", s.buf, -1, -1, false, { "// edited while checking" })
+s = wait(function(st) return not st.checking and st.check.ok end, 120000)
+check(not s.done and s.panel_title == "check passed, code changed",
+  "a pass for code that changed meanwhile does not complete the step")
+rq("nvim_command", "GotyperSubmit")
+s = wait(function(st) return not st.checking and st.done end, 120000)
+check(s.check.ok and s.panel_title == "step passed", "submitting the fixed code passes and completes the step")
+check(lua("return vim.wo[require('gotyper').state().win].winbar"):find("[DONE]", 1, true) ~= nil, "winbar says DONE")
+rq("nvim_command", "tabclose")
+vim.uv.sleep(200)
+check(state() == nil, "closing the tab ends the recall game")
+
+-- 9. A front end speaking another protocol version gets a clear message.
 lua([[
   _G.gotyper_msgs = {}
   vim.notify = function(msg) table.insert(_G.gotyper_msgs, msg) end

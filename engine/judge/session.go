@@ -94,9 +94,16 @@ func (s *Session) Width() int {
 // span (in byte offsets, because that is what Neovim highlights by). Whatever
 // part of the target row lies past the end of the typed row becomes that row's
 // ghost, and target rows past the end of the buffer become ghost lines.
+//
+// In a recall step none of that happens: see recallUpdate.
 func (s *Session) Update(lines []string, keys int, cursor [2]int) Render {
 	t0 := time.Now()
 	r := Render{ErrorSpans: []Span{}, Ghosts: []Ghost{}, GhostLines: []string{}}
+	if s.step.Mode == lesson.Recall {
+		r.Stats = s.recallUpdate(lines, keys)
+		r.ComputeUS = time.Since(t0).Microseconds()
+		return r
+	}
 	curErr := map[errKey]bool{}
 	correct, typedAny := 0, false
 	done := true
@@ -210,4 +217,24 @@ func (s *Session) Update(lines []string, keys int, cursor [2]int) Render {
 	r.Done = done
 	r.ComputeUS = time.Since(t0).Microseconds()
 	return r
+}
+
+// recallUpdate is Update for a recall step. The learner writes the file from
+// memory, so their lines need not line up with the target's: a missing blank
+// line would shift every later row, and a row-by-row diff would paint
+// correct code red. So the target is never shown and nothing is judged here.
+// Only the keystrokes and the time since the first typed character are
+// reported; the other stats stay 0, and the step is completed by a passing
+// check (the protocol's check op), not by Update.
+func (s *Session) recallUpdate(lines []string, keys int) Stats {
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" && s.started.IsZero() {
+			s.started = s.now()
+		}
+	}
+	st := Stats{Keys: keys}
+	if !s.started.IsZero() {
+		st.Seconds = s.now().Sub(s.started).Seconds()
+	}
+	return st
 }

@@ -19,7 +19,9 @@ function M.set_highlights()
   api.nvim_set_hl(0, "GotyperGhost", { default = true, fg = nontext.fg, italic = true })
   -- The background makes a wrong space visible.
   api.nvim_set_hl(0, "GotyperError", { default = true, fg = "#ff6b6b", bg = "#4a1c1c", bold = true })
-  api.nvim_set_hl(0, "GotyperDone", { default = true, link = "DiagnosticOk" })
+  -- A check result: the panel turns green for a pass, red for a fail.
+  api.nvim_set_hl(0, "GotyperPass", { default = true, link = "DiagnosticOk" })
+  api.nvim_set_hl(0, "GotyperFail", { default = true, link = "DiagnosticError" })
 end
 
 -- paint replaces the game buffer's ghosts and red spans with those in render.
@@ -54,11 +56,18 @@ function M.paint(buf, render)
 end
 
 -- set_winbar shows the stats in the game window's own winbar (window-local, so
--- other windows keep theirs). suffix is extra text such as "[DONE]".
-function M.set_winbar(win, stats, suffix)
+-- other windows keep theirs). A recall step has only keystrokes and time to
+-- show: without a target there is no accuracy or line count. suffix is extra
+-- text such as "[DONE]".
+function M.set_winbar(win, stats, recall, suffix)
   if not api.nvim_win_is_valid(win) then return end
-  local text = (" gotyper  WPM %3.0f  ACC %5.1f%%  KEYS %d  line %d/%d  errors %d  %3.0fs%s"):format(
-    stats.wpm, stats.accuracy, stats.keys, stats.line, stats.lines, stats.errors, stats.seconds, suffix or "")
+  local text
+  if recall then
+    text = (" gotyper  recall  KEYS %d  %3.0fs%s"):format(stats.keys, stats.seconds, suffix or "")
+  else
+    text = (" gotyper  WPM %3.0f  ACC %5.1f%%  KEYS %d  line %d/%d  errors %d  %3.0fs%s"):format(
+      stats.wpm, stats.accuracy, stats.keys, stats.line, stats.lines, stats.errors, stats.seconds, suffix or "")
+  end
   -- In a statusline expression % starts an item, so a literal % is written %%.
   vim.wo[win].winbar = "%#TabLineSel#" .. text:gsub("%%", "%%%%") .. "%#Normal#"
 end
@@ -83,7 +92,7 @@ end
 
 -- show_panel opens (or updates) a floating window over the game window with
 -- the given lines and title, and returns the panel { win, buf }. hl, when set,
--- recolours its text and border, as for the "done" message.
+-- recolours its text and border, as for a check result.
 function M.show_panel(panel, win, code_width, lines, title, hl)
   local cfg = panel_config(win, lines, code_width)
   cfg.title = " " .. title .. " "

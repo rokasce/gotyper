@@ -2,10 +2,14 @@ package protocol
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rokasce/gotyper/engine/lesson"
 )
@@ -20,14 +24,17 @@ var lessons = func() lesson.Library {
 	return lib
 }()
 
-const firstStep = "json-api/01-greet-handler"
+const (
+	firstStep  = "json-api/01-greet-handler"
+	recallStep = "json-api/02-greet-handler-recall"
+)
 
 // serve feeds input to a fresh server and returns the decoded responses, one
 // per output line.
 func serve(t *testing.T, input string) []Response {
 	t.Helper()
 	var out strings.Builder
-	if err := NewServer(lessons).Serve(strings.NewReader(input), &out); err != nil {
+	if err := NewServer(context.Background(), lessons).Serve(strings.NewReader(input), &out); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	var resps []Response
@@ -114,7 +121,11 @@ func TestMalformedLineKeepsEngineRunning(t *testing.T) {
 }
 
 func TestUpdateBeforeStart(t *testing.T) {
-	resps := serve(t, hello+`{"id":2,"op":"update","lines":["p"]}`+"\n"+`{"id":3,"op":"restart"}`+"\n")
+	resps := serve(t, hello+`{"id":2,"op":"update","lines":["p"]}`+"\n"+`{"id":3,"op":"restart"}`+"\n"+
+		`{"id":4,"op":"check","lines":["p"]}`+"\n")
+	if len(resps) != 4 {
+		t.Fatalf("got %d responses, want 4", len(resps))
+	}
 	for _, r := range resps[1:] {
 		if r.Error == nil || r.Error.Code != CodeNoStep {
 			t.Fatalf("%s before start = %+v", r.Op, r)
@@ -218,11 +229,131 @@ func TestStartWithoutIDPicksTheFirstStep(t *testing.T) {
 func TestStartWithNoLessons(t *testing.T) {
 	var out strings.Builder
 	in := hello + `{"id":2,"op":"start"}` + "\n" + `{"id":3,"op":"list"}` + "\n"
-	if err := NewServer(lesson.Library{}).Serve(strings.NewReader(in), &out); err != nil {
+	if err := NewServer(context.Background(), lesson.Library{}).Serve(strings.NewReader(in), &out); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	if !strings.Contains(lines[1], CodeUnknownStep) || !strings.Contains(lines[2], `"tracks":[]`) {
 		t.Fatalf("responses = %q", lines)
+	}
+}
+
+// linesJSON encodes lines as a JSON array for a hand-written request.
+func linesJSON(t *testing.T, lines []string) string {
+	t.Helper()
+	b, err := json.Marshal(lines)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// TestCheckDoesNotBlockUpdates sends a check and then an update. The check
+// runs go vet and go test, which takes a second or more, so the update must
+// be answered first, and the check's answer must still arrive.
+func TestCheckDoesNotBlockUpdates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go vet and go test")
+	}
+	step, _ := lessons.Step(firstStep)
+	resps := serve(t, hello+
+		`{"id":2,"op":"start","step":"`+firstStep+`"}`+"\n"+
+		`{"id":3,"op":"check","lines":`+linesJSON(t, step.Target)+`}`+"\n"+
+		`{"id":4,"op":"update","lines":["p"],"keys":1,"cursor":[0,1]}`+"\n")
+	if len(resps) != 4 {
+		t.Fatalf("got %d responses, want 4", len(resps))
+	}
+	if id(resps[2]) != 4 || resps[2].Render == nil {
+		t.Fatalf("the update should be answered before the check, got %+v first", resps[2])
+	}
+	c := resps[3]
+	if id(c) != 3 || c.Op != OpCheck || c.Error != nil || c.Check == nil || !c.Check.OK {
+		t.Fatalf("check of the target = %+v (check %+v)", c, c.Check)
+	}
+}
+
+// TestRecallStep plays the recall step: no ghosts or red for any text, and a
+// check grades what was typed. Here it is the target without the return
+// after http.Error, which compiles but fails the hidden test.
+func TestRecallStep(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go vet and go test")
+	}
+	step, ok := lessons.Step(recallStep)
+	if !ok {
+		t.Fatalf("%s is missing", recallStep)
+	}
+	var forgot []string
+	for _, l := range step.Target {
+		if strings.TrimSpace(l) != "return" {
+			forgot = append(forgot, l)
+		}
+	}
+	resps := serve(t, hello+
+		`{"id":2,"op":"start","step":"`+recallStep+`"}`+"\n"+
+		`{"id":3,"op":"update","lines":["packx"],"keys":5,"cursor":[0,5]}`+"\n"+
+		`{"id":4,"op":"check","lines":`+linesJSON(t, forgot)+`}`+"\n")
+	if len(resps) != 4 {
+		t.Fatalf("got %d responses, want 4", len(resps))
+	}
+	st, r := resps[1].Start, resps[1].Render
+	if st == nil || st.Mode != lesson.Recall || r == nil || len(r.Ghosts) != 0 || len(r.GhostLines) != 0 {
+		t.Fatalf("recall start = %+v, render %+v", st, r)
+	}
+	if r := resps[2].Render; r == nil || len(r.ErrorSpans) != 0 || len(r.Ghosts) != 0 || r.Stats.Keys != 5 || r.Done {
+		t.Fatalf("recall update = %+v", r)
+	}
+	if c := resps[3].Check; c == nil || c.OK || c.Stage != "test" || !strings.Contains(c.Output, "did you return?") {
+		t.Fatalf("check without the return = %+v", c)
+	}
+}
+
+// TestCancelStopsChecksAndCleansUp cancels the server's context while a
+// check runs and the input is still open, as SIGTERM does in the engine.
+// Serve must return without waiting for more input, and the check's
+// temporary module must be removed.
+func TestCancelStopsChecksAndCleansUp(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go vet and go test")
+	}
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp) // os.MkdirTemp, used by check.Run, creates its directories here
+	checkDirs := func() []string {
+		dirs, err := filepath.Glob(filepath.Join(tmp, "gotyper-check-*"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dirs
+	}
+
+	step, _ := lessons.Step(firstStep)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	in, feed := io.Pipe()
+	defer feed.Close()
+	served := make(chan error, 1)
+	go func() { served <- NewServer(ctx, lessons).Serve(in, io.Discard) }()
+	go io.WriteString(feed, hello+
+		`{"id":2,"op":"start","step":"`+firstStep+`"}`+"\n"+
+		`{"id":3,"op":"check","lines":`+linesJSON(t, step.Target)+`}`+"\n")
+
+	deadline := time.Now().Add(30 * time.Second)
+	for len(checkDirs()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("no check started")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Fatalf("Serve: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("Serve did not return after the context was cancelled")
+	}
+	if dirs := checkDirs(); len(dirs) != 0 {
+		t.Fatalf("check directories left behind: %v", dirs)
 	}
 }

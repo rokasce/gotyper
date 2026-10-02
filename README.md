@@ -19,7 +19,7 @@ To install it with [lazy.nvim](https://github.com/folke/lazy.nvim):
 ```lua
 {
   "rokasce/gotyper", -- or: dir = "~/path/to/gotyper"
-  cmd = { "Gotyper", "GotyperRestart", "GotyperPanel" },
+  cmd = { "Gotyper", "GotyperRestart", "GotyperPanel", "GotyperSubmit" },
 }
 ```
 
@@ -27,13 +27,18 @@ To install it with [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 `:Gotyper` lists the lesson steps, each with its track, title and mode, and starts the one you pick. `:Gotyper <step-id>` starts a step directly; `<Tab>` completes the ids, such as `json-api/01-greet-handler`. The game opens in a new tab. Type the italic ghost text. Mistakes turn red; fix them with any vim motion. The bar at the top shows WPM, accuracy, keystrokes, finished lines and charged errors. You never type indentation: pressing `<Enter>` inserts the line's indentation for you. For this game buffer only, gotyper turns off auto-pairing, completion, Copilot and auto-formatting, and keeps gopls from attaching. Your config is left alone everywhere else.
 
+When every line matches, gotyper compiles and tests what you typed (`go vet`, then the step's hidden tests with `go test`) and shows PASS or FAIL with the go output in the panel. The first check builds the standard library packages the step uses, which takes a few seconds; later checks take about one.
+
+Some steps are **recall** steps: you write the file from memory, with no ghost text and nothing turning red, and the bar shows only keystrokes and time. Press `<F6>` to submit. If `go vet` or the tests fail, the panel shows why; fix the code and submit again. The step is done when the check passes; if you edit while the check runs, submit again so the edited code is checked. Pick a recall step from `:Gotyper` like any other, or start one directly, for example `:Gotyper json-api/02-greet-handler-recall`.
+
 | Key (normal or insert mode) | Command | What it does |
 |---|---|---|
 | `<F5>` | `:GotyperRestart` | Throw the attempt away and type the step again from an empty buffer. The error count, keystrokes and timer start over. |
+| `<F6>` | `:GotyperSubmit` | Compile and test what is in the buffer now. This is how you finish a recall step. A type-along step is checked automatically when its text matches, so there it only says so. |
 | `<F2>` | `:GotyperPanel` | Hide or show the explanation panel, for when it covers code in a small terminal. |
 | `:tabclose` or `:q` | | End the game. The engine stops and the game buffer is wiped. |
 
-To use other keys, map `:GotyperRestart` and `:GotyperPanel` to them in your own config.
+To use other keys, map `:GotyperRestart`, `:GotyperSubmit` and `:GotyperPanel` to them in your own config.
 
 ### Test the plugin
 

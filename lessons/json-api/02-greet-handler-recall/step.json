@@ -1,0 +1,17 @@
+{
+  "title": "Step 2 - recall: the JSON handler from memory",
+  "mode": "recall",
+  "file": "handler.go",
+  "intro": [
+    "Write step 1's `handler.go` again, from memory.",
+    "There is no ghost text and nothing turns red.",
+    "",
+    "It needs `greet(name string) (greeting, error)`, which",
+    "returns an error for an empty name, and `greetHandler`,",
+    "which answers 400 with only the error, or the greeting",
+    "as JSON.",
+    "",
+    "Press `<F6>` to submit: `go vet` and the step's hidden",
+    "tests decide. If they fail, fix it and submit again."
+  ]
+}

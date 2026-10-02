@@ -5,7 +5,9 @@
 --
 --   1. opens a game tab with a scratch buffer the learner types into,
 --   2. sends the whole buffer to the engine on every change ("update"),
---   3. paints the answer (gotyper.ui): ghost text, red mistakes, stats.
+--   3. paints the answer (gotyper.ui): ghost text, red mistakes, stats,
+--   4. asks the engine to compile and test the buffer ("check") and shows
+--      the result.
 --
 -- gotyper.engine owns the engine process and the wire protocol. This file
 -- owns the session: the game buffer, its keys and hooks, restart and teardown.
@@ -14,10 +16,15 @@ local M = {}
 local api, engine, ui = vim.api, require("gotyper.engine"), require("gotyper.ui")
 
 -- The game keys: buffer-local mappings in the game buffer, active in both
--- normal and insert mode. To use other keys, map :GotyperRestart and
--- :GotyperPanel yourself.
+-- normal and insert mode. To use other keys, map :GotyperRestart,
+-- :GotyperPanel and :GotyperSubmit yourself.
 local RESTART_KEY = "<F5>" -- throw the attempt away and type the step again
 local PANEL_KEY = "<F2>" -- show or hide the explanation panel
+local SUBMIT_KEY = "<F6>" -- recall steps: compile and test what is typed (go vet + go test)
+
+-- INDENTEXPR is the type-along indentexpr: indentation comes from the engine
+-- through M.indent.
+local INDENTEXPR = "v:lua.require'gotyper'.indent(v:lnum)"
 
 -- ns_key identifies our vim.on_key hook so stop() can remove exactly it.
 local ns_key = api.nvim_create_namespace("gotyper_keys")
@@ -27,10 +34,16 @@ local ns_key = api.nvim_create_namespace("gotyper_keys")
 --   client        the engine connection (gotyper.engine.connect)
 --   buf, win      the game buffer and the window showing it
 --   info          the step layout from the engine's start response
+--   recall        the step is a recall step (info.mode == "recall")
 --   last          the latest render that was painted
 --   keys          keystrokes in this attempt, sent with every update
 --   seq           id of the newest update sent; older answers are dropped
---   done          whether the latest render said the step is complete
+--   attempt       counts attempts (start and restart), so a check answer
+--                 that arrives after a restart is recognised and dropped
+--   done          the step is complete: in a type-along step the latest
+--                 render said so, in a recall step a check passed
+--   checking      a check was sent and not answered yet
+--   check         the latest check result (engine/PROTOCOL.md, "check")
 --   panel         the explanation panel window, see ui.show_panel
 --   panel_hidden  the learner hid the panel with the toggle key
 --   panel_content what the panel shows (or would show, when hidden)
@@ -41,9 +54,13 @@ local ns_key = api.nvim_create_namespace("gotyper_keys")
 --   wiping        the game buffer is being wiped (see install_hooks)
 local S
 
--- help_lines lists the game keys, for the bottom of the panel.
+-- help_lines lists the game keys, for the bottom of the panel. Only a
+-- recall step is submitted by hand.
 local function help_lines()
-  return { "", RESTART_KEY .. "  restart the step    " .. PANEL_KEY .. "  hide/show this panel" }
+  local lines = { "" }
+  if S.recall then lines[#lines + 1] = SUBMIT_KEY .. "  submit: go vet + go test" end
+  lines[#lines + 1] = RESTART_KEY .. "  restart the step    " .. PANEL_KEY .. "  hide/show this panel"
+  return lines
 end
 
 -- show_panel shows `lines` in the panel unless the learner has hidden it. The
@@ -58,28 +75,94 @@ local function show_intro()
   show_panel(vim.list_extend(vim.deepcopy(S.info.intro), help_lines()), S.info.title)
 end
 
--- on_done runs once when the step becomes complete: leave insert mode so
--- stray keys do not edit the finished code, and say how it went.
-local function on_done(stats)
-  vim.cmd.stopinsert()
+-- update_winbar shows the latest stats, marked while a check runs and once
+-- the step is done.
+local function update_winbar()
+  local suffix = S.checking and "  [checking...]" or S.done and "  [DONE]" or ""
+  ui.set_winbar(S.win, S.last.stats, S.recall, suffix)
+end
+
+-- show_result shows a check result in the panel. A pass completes a recall
+-- step, but only if the buffer is still the code that was checked: `tick` is
+-- the buffer's changedtick when the check was sent, and the learner may have
+-- kept typing since. A type-along step is only checked once its text
+-- matches, so it is already complete.
+local function show_result(c, tick)
+  S.check = c
+  local changed = S.recall and vim.b[S.buf].changedtick ~= tick
+  if c.ok and S.recall and not S.done and not changed then
+    S.done = true
+    vim.cmd.stopinsert() -- the step is finished; stray keys should not edit it
+  end
+  local st = S.last.stats
+  local lines = {
+    c.ok and ("PASS  go vet + go test (%dms)"):format(c.ms) or ("FAIL  at go %s (%dms)"):format(c.stage, c.ms),
+    "",
+    S.recall and ("keystrokes %d   %.0fs"):format(st.keys, st.seconds)
+      or ("WPM %.0f   accuracy %.1f%%   keystrokes %d   %.0fs"):format(st.wpm, st.accuracy, st.keys, st.seconds),
+    "",
+  }
+  -- A buffer line cannot hold a newline, so the output becomes one panel
+  -- line per output line.
+  vim.list_extend(lines, vim.split(c.output ~= "" and c.output or "(no output)", "\n"))
+  lines[#lines + 1] = ""
+  if changed then
+    lines[#lines + 1] = "The code changed since it was submitted; press " .. SUBMIT_KEY .. " to check it again."
+  elseif not c.ok and S.recall then
+    lines[#lines + 1] = "Fix it and press " .. SUBMIT_KEY .. " to check again."
+  else
+    lines[#lines + 1] = "Press " .. RESTART_KEY .. " to do the step again."
+  end
+  local title = changed and (c.ok and "check passed, code changed" or "check failed, code changed")
+    or c.ok and "step passed" or "check failed"
   S.panel_hidden = false -- the result is worth showing even if the intro was hidden
-  show_panel({
-    "You typed the whole step.",
-    "",
-    ("WPM %.0f   accuracy %.1f%%   keystrokes %d   %.0fs"):format(stats.wpm, stats.accuracy, stats.keys, stats.seconds),
-    "",
-    "Press " .. RESTART_KEY .. " to type it again.",
-  }, "step done", "GotyperDone")
+  show_panel(lines, title, c.ok and "GotyperPass" or "GotyperFail")
+  update_winbar()
+end
+
+-- run_check asks the engine to compile and test the buffer (the "check" op:
+-- go vet, then the step's hidden tests) and shows the result. It takes a
+-- second or more; the engine keeps answering updates meanwhile, so the
+-- learner can keep typing.
+local function run_check()
+  if S.checking then return end -- one at a time; the panel already says it is running
+  S.checking = true
+  local client, attempt, tick = S.client, S.attempt, vim.b[S.buf].changedtick
+  S.panel_hidden = false
+  show_panel({ "Running go vet + go test..." }, "checking")
+  update_winbar()
+  client.request("check", { lines = api.nvim_buf_get_lines(S.buf, 0, -1, false) }, function(resp)
+    -- Drop the answer if the game ended or was restarted meanwhile: it
+    -- grades a buffer that is gone.
+    if not S or S.client ~= client or S.attempt ~= attempt then return end
+    S.checking = false
+    if resp.error then
+      update_winbar()
+      return vim.notify("gotyper engine: " .. resp.error.message, vim.log.levels.ERROR)
+    end
+    show_result(resp.check, tick)
+  end)
+end
+
+-- on_done runs when a type-along step becomes complete: leave insert mode so
+-- stray keys do not edit the finished code, then compile and test it.
+local function on_done()
+  vim.cmd.stopinsert()
+  run_check()
 end
 
 -- apply paints a render from the engine and updates the session from it.
 local function apply(render)
   ui.paint(S.buf, render)
   S.last = render
-  local was_done = S.done
-  S.done = render.done
-  ui.set_winbar(S.win, render.stats, render.done and "  [DONE]" or "")
-  if render.done and not was_done then on_done(render.stats) end
+  -- In a type-along step the engine says when the text matches. A recall
+  -- step's render is never done; a passing check completes it instead.
+  if not S.recall then
+    local was_done = S.done
+    S.done = render.done
+    if S.done and not was_done then on_done() end
+  end
+  update_winbar()
 end
 
 -- send_update sends the buffer to the engine and paints the answer.
@@ -158,7 +241,7 @@ local function open_game_buffer()
   -- Indentation comes from the engine through M.indent, as real tabs.
   bo.expandtab, bo.tabstop, bo.shiftwidth, bo.softtabstop = false, 4, 4, 0
   bo.autoindent, bo.smartindent, bo.cindent = true, false, false
-  bo.indentexpr = "v:lua.require'gotyper'.indent(v:lnum)"
+  bo.indentexpr = INDENTEXPR
   bo.indentkeys = "o,O" -- recompute indent only when a line is opened
   -- The variables are set before the buffer is shown, because some plugins
   -- decide whether to attach when a buffer is first entered.
@@ -191,11 +274,20 @@ end
 -- answer with the same shape (engine/PROTOCOL.md).
 local function begin_attempt(resp)
   S.info = resp.start
+  S.recall = S.info.mode == "recall"
   S.keys = 0 -- the protocol requires the key count to restart from 0
   S.seq = S.seq + 1 -- answers to updates sent before this point are stale
+  S.attempt = S.attempt + 1 -- and so is the answer to a check still running
   S.done = false
+  S.checking = false
+  S.check = nil
   S.flush_pending = false
   S.restarting = false
+  -- A recall step's lines need not line up with the target's, so the
+  -- engine's per-line indentation would be wrong there. Neovim's
+  -- smartindent indents after a { and dedents on } instead.
+  local bo = vim.bo[S.buf]
+  bo.indentexpr, bo.smartindent = S.recall and "" or INDENTEXPR, S.recall
   clear_buffer()
   apply(resp.render)
   show_intro()
@@ -214,16 +306,18 @@ local function install_hooks()
   -- vim.on_key sees every key the learner presses, before mappings run,
   -- including normal-mode motions and <Esc>. Only keys pressed while the game
   -- buffer is focused are counted, and none once the step is done.
-  -- The panel key is not counted: showing the explanation is not typing.
-  local panel_key = vim.keycode(PANEL_KEY)
+  -- The panel and submit keys are not counted: they are not typing.
+  local panel_key, submit_key = vim.keycode(PANEL_KEY), vim.keycode(SUBMIT_KEY)
   vim.on_key(function(_, typed)
-    if S and typed and typed ~= "" and typed ~= panel_key and not S.done and api.nvim_get_current_buf() == S.buf then
+    if S and typed and typed ~= "" and typed ~= panel_key and typed ~= submit_key and not S.done
+      and api.nvim_get_current_buf() == S.buf then
       S.keys = S.keys + 1
     end
   end, ns_key)
 
   vim.keymap.set({ "n", "i" }, RESTART_KEY, M.restart, { buffer = buf, desc = "gotyper: restart the step" })
   vim.keymap.set({ "n", "i" }, PANEL_KEY, M.toggle_panel, { buffer = buf, desc = "gotyper: toggle the explanation panel" })
+  vim.keymap.set({ "n", "i" }, SUBMIT_KEY, M.submit, { buffer = buf, desc = "gotyper: submit a recall step (go vet + go test)" })
 
   local group = api.nvim_create_augroup("gotyper_session", { clear = true })
   S.augroup = group
@@ -327,7 +421,7 @@ function M.start(step)
 
   -- The tab opens right away; the engine's answers arrive a few ms later.
   local buf, win = open_game_buffer()
-  S = { client = client, buf = buf, win = win, seq = 0, keys = 0, done = false,
+  S = { client = client, buf = buf, win = win, seq = 0, attempt = 0, keys = 0, done = false,
     during_startup = vim.v.vim_did_enter == 0 }
 
   client.request("hello", { protocol = engine.PROTOCOL }, function(hello)
@@ -371,6 +465,20 @@ function M.restart()
   end)
 end
 
+-- submit compiles and tests what is typed (go vet + go test) and shows the
+-- result, in a recall step. A pass completes the step; a fail shows what went
+-- wrong and the learner can keep editing. A type-along step is not submitted:
+-- it is checked by itself when its text matches (see on_done).
+function M.submit()
+  if not (S and S.info) then
+    return vim.notify("gotyper: no game is running; start one with :Gotyper", vim.log.levels.WARN)
+  end
+  if not S.recall then
+    return vim.notify("gotyper: type-along steps are checked automatically when finished", vim.log.levels.INFO)
+  end
+  run_check()
+end
+
 -- toggle_panel hides or shows the explanation panel, so it never has to
 -- cover code in a small terminal.
 function M.toggle_panel()
@@ -403,7 +511,9 @@ function M.state()
   if not S then return nil end
   return {
     buf = S.buf, win = S.win, chan = S.client.chan, info = S.info, last = S.last, keys = S.keys, done = S.done,
+    checking = S.checking, check = S.check,
     panel_open = S.panel ~= nil and api.nvim_win_is_valid(S.panel.win),
+    panel_title = S.panel_content and S.panel_content.title,
   }
 end
 

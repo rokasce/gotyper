@@ -3,8 +3,9 @@
 The engine is a small Go program that judges typing. At start-up it loads the
 lessons from disk. The Neovim plugin picks a step and then sends the buffer
 on every change. The engine answers with what to paint: red
-spans, ghost text and stats. This page follows one keystroke through the code
-and shows how to run the engine by hand.
+spans, ghost text and stats. When asked, it also compiles and tests the
+buffer with the go command. This page follows one keystroke and one check
+through the code and shows how to run the engine by hand.
 
 ## Which file does what
 
@@ -13,16 +14,18 @@ and shows how to run the engine by hand.
 | `cmd/gotyper-engine/main.go` | Entry point. Parses flags, loads the lessons, then runs the protocol server on stdin/stdout. |
 | `cmd/gotyper-engine/selftest.go` | `--selftest`: lists the lessons, then plays the first step through the real protocol code and checks the results. |
 | `protocol/protocol.go` | The wire types (`Request`, `Response`, ...), the protocol version and the error codes. |
-| `protocol/server.go` | The NDJSON read loop (`Serve`) and the dispatcher (`Handle`). Keeps the lessons, the handshake flag and the current session. |
+| `protocol/server.go` | The NDJSON read loop (`Serve`) and the dispatcher (`Handle`). Keeps the lessons, the handshake flag and the current session, and runs checks in the background. |
 | `judge/judge.go` | The result types the front end paints: `Span`, `Ghost`, `Stats`, `Render`. |
-| `judge/session.go` | The diff and the scoring: `Session.Update`, `Restart`, `Indents`. |
+| `judge/session.go` | The diff and the scoring: `Session.Update`, `Restart`, `Indents`. Recall steps skip the diff. |
+| `check/check.go` | `check.Run`: builds a step's module with a given version of its file and runs `go vet` and `go test` on it. |
 | `judge/text.go` | Tab helpers: indentation width and tab expansion. |
 | `lesson/lesson.go` | The `Step`, `Track` and `Library` types, and `Load`, which reads and validates the lessons directory. |
-| `lesson/lessons_test.go` | `TestLessonsOnDisk`: compiles and tests every step on disk. |
+| `lesson/lessons_test.go` | `TestLessonsOnDisk`: runs `check.Run` on every step's own target. |
 | `PROTOCOL.md` | The wire schema. |
 | `../lessons/` | The lessons themselves. `../lessons/README.md` describes the format. |
 
-Packages only depend downwards: `main` → `protocol` → `judge` → `lesson`.
+Packages only depend downwards: `main` → `protocol` → `judge` and `check`
+→ `lesson`.
 
 ## Loading the lessons
 
@@ -57,12 +60,13 @@ broken lessons without touching the disk.
    starts with `step <id>:`, and they are combined with `errors.Join`, so one
    run shows every broken lesson.
 
-`Step.Module` returns the step's whole module as a map from file path to
-contents: carried files, target and hidden files. `Step.WriteModule` writes it
-to a directory. `TestLessonsOnDisk` does that for every step in a temporary
-directory and runs `go vet ./...` and `go test ./...` there, so a lesson whose
-tests fail, or whose target doesn't compile with its hidden files, fails the
-engine's test suite under the step's id.
+`Step.Module(source)` returns the step's whole module as a map from file
+path to contents: carried files, `source` as the step's own file, and hidden
+files. `Step.WriteModule` writes it to a directory. `check.Run` builds on
+that (see [Checking the code](#checking-the-code)), and `TestLessonsOnDisk`
+calls `check.Run` with every step's own target, so a lesson whose tests fail,
+or whose target doesn't compile with its hidden files, fails the engine's
+test suite under the step's id.
 
 ## Picking a step
 
@@ -122,6 +126,60 @@ the error count, the mistake history and the timer but keeps the step that
 `start` picked. The
 engine then replies with the step layout and the render of an empty buffer.
 
+In a **recall** step `Session.Update` skips steps 5 and 6. The learner writes
+from memory, so their rows need not line up with the target's, and a
+row-by-row diff would paint correct code red. It only starts the timer and
+reports the keystrokes and the time; there are no spans, ghosts or ghost
+lines, and `done` stays false. A passing check completes the step instead.
+
+## Checking the code
+
+A check is how the engine grades code rather than typing: does it compile,
+and do the step's hidden tests pass?
+
+1. **The plugin sends `check`** with the whole buffer:
+   `{"id":9,"op":"check","lines":["package main",...]}`. It does this by itself
+   when a type-along step's text matches, and when the learner presses `<F6>`
+   in a recall step.
+2. **`handleLine` sees `op` is `check`** (`protocol/server.go`). Running the go
+   command takes a second or more, and the learner may keep typing meanwhile,
+   so it is not answered in line. `checkJob` reads the step being played and
+   the lines right away, on the goroutine that handles every request, and
+   returns a function that does the slow part. `handleLine` starts that
+   function on a new goroutine and goes straight back to reading requests.
+   The function touches no `Server` state, so it can't race with the updates
+   handled while it runs.
+3. **`check.Run` builds the module** (`check/check.go`). It makes a temporary
+   directory and writes `Step.Module(source)` into it, where `source` is the
+   typed lines joined with newlines.
+4. **It runs `go vet ./...`, then `go test ./...`** in that directory, stopping
+   at the first that fails. `GOWORK=off` and an empty `GOFLAGS` keep the
+   learner's environment from changing the result.
+   Each command is stopped after a minute, in case the learner's code loops
+   forever. It is stopped with an interrupt, so the go command can remove its
+   work directory; only if it is still running one second later is it
+   killed. The interrupt does not reach a test binary the go command is
+   running, so `go test` also gets `-timeout=50s`: a looping test panics and
+   exits by itself, and its stack trace shows where it was stuck.
+5. **The output is tidied**: the temporary directory's path is cut out, so
+   errors read `./handler.go:14:22: undefined: errors`, and only the first 20
+   lines are kept for the panel.
+6. **The goroutine writes the response** through `lineWriter`, whose mutex
+   keeps two goroutines from writing over each other's line. The plugin
+   matches it to its request by `id`, so it doesn't matter that update
+   answers sent later have already gone out.
+
+Why the build cache matters: compiling `net/http` and its dependencies takes
+a few seconds; after that the go command reuses them and a check takes about
+one second, so only the first check is slow.
+
+When stdin closes, `Serve` waits for the checks still running, so they are
+answered. Neovim's `jobstop` also sends SIGTERM, which would end the engine
+before any cleanup ran, so `main` catches it with `signal.NotifyContext` and
+passes that context to `NewServer`. When it is cancelled, `Serve` returns
+without waiting for more input, the running checks are stopped, and
+`check.Run` still removes their temporary directories.
+
 ## The Neovim side
 
 The plugin lives outside this directory, in `plugin/` and `lua/gotyper/` at the
@@ -130,10 +188,10 @@ answer.
 
 | File | Role |
 |---|---|
-| `plugin/gotyper.lua` | Defines `:Gotyper` (with completion of step ids), `:GotyperRestart` and `:GotyperPanel`. |
+| `plugin/gotyper.lua` | Defines `:Gotyper` (with completion of step ids), `:GotyperRestart`, `:GotyperPanel` and `:GotyperSubmit`. |
 | `lua/gotyper/engine.lua` | Builds this engine into `bin/` when its sources are newer than the binary, starts it as a job, and frames NDJSON requests and responses by `id`. |
-| `lua/gotyper/init.lua` | The step picker and the session: the game tab and buffer, change tracking, key counting, auto-indent, restart, the panel toggle and teardown. |
-| `lua/gotyper/ui.lua` | Painting: error spans and ghosts as extmarks, ghost lines as virtual lines, the stats winbar and the explanation panel. |
+| `lua/gotyper/init.lua` | The step picker and the session: the game tab and buffer, change tracking, key counting, auto-indent, restart, checks and their results, the panel toggle and teardown. |
+| `lua/gotyper/ui.lua` | Painting: error spans and ghosts as extmarks, ghost lines as virtual lines, the stats winbar and the panel. |
 | `test/run.sh`, `test/drive.lua` | End-to-end test: a real headless Neovim driven key by key over its RPC socket. |
 
 `:Gotyper` without a step id, and completing its argument, run a short-lived
@@ -161,7 +219,26 @@ What happens when the learner presses the restart key (`<F5>`):
    layout and the render of an empty buffer.
 4. The plugin empties the buffer without making it undoable, sets its key count
    back to 0 as the protocol requires, paints the render (ghost text again, no
-   red) and puts the learner back in insert mode on the first line.
+   red) and puts the learner back in insert mode on the first line. It also
+   counts a new attempt, so the answer to a check sent before the restart is
+   ignored when it arrives.
+
+What happens when a check runs:
+
+1. In a type-along step, the render that says `done` makes the plugin leave
+   insert mode and call `run_check()` in `lua/gotyper/init.lua`. In a recall
+   step `<F6>` (`:GotyperSubmit`) calls it; in a type-along step `<F6>` only
+   says that the step is checked when it is finished. Checking early there
+   could race the finishing keystroke: the early check's answer would arrive
+   for unfinished code after the step was done.
+2. `run_check()` shows "Running go vet + go test..." in the panel and sends
+   `check` with the buffer. Updates go on being sent and painted meanwhile.
+3. When the answer comes, `show_result()` fills the panel: PASS or FAIL, the
+   stage that failed, the stats and the go output. In a recall step a pass
+   marks the step done; a fail leaves the learner editing, to submit again.
+   `run_check()` remembers the buffer's `changedtick` when it sends the
+   check, and a pass for a buffer edited since then does not complete the
+   step: the panel says the code changed and asks for another submit.
 
 ## Run it and poke it by hand
 
@@ -191,9 +268,14 @@ per line, and press Ctrl-D to end. Things worth trying:
 
 - Send `start` before `hello` to get `handshake_required`.
 - Send `start` with a made-up `step` to get `unknown_step`.
-- Break a lesson, for example by setting `"mode":"recall"` in its
+- Break a lesson, for example by setting `"mode":"race"` in its
   `step.json`, and start the engine: it prints every problem it found to
   stderr and exits.
+- Send a check:
+  `{"id":7,"op":"check","lines":["package main"]}`. It fails at `go vet`
+  with `undefined: greetHandler`, because the hidden `main.go` uses a
+  function that file doesn't have. Send an `update` straight after it: its
+  answer comes first.
 - Send `"protocol":2` in the `hello` to get `version_mismatch`.
 - Type a line of garbage to get `bad_json`. The engine keeps answering.
 - Move `cursor` away from the typo in an update. The span is still red, but
