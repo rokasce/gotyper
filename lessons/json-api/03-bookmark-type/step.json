@@ -1,0 +1,18 @@
+{
+  "title": "Step 3 - a Bookmark type with JSON struct tags",
+  "mode": "type-along",
+  "file": "bookmark.go",
+  "intro": [
+    "The rest of this track builds a bookmarks API.",
+    "It starts with the value it stores.",
+    "",
+    "The text in backquotes after each field is a struct tag.",
+    "`encoding/json` reads it to name the field in JSON, so",
+    "Go's `URL` becomes `\"url\"`. Without the tag JSON would",
+    "use the Go name as is.",
+    "",
+    "`omitempty` leaves a field out when it holds its zero",
+    "value, so a bookmark without a title has no `\"title\"`.",
+    "A `time.Time` encodes as an RFC 3339 string."
+  ]
+}

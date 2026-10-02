@@ -1,0 +1,17 @@
+{
+  "title": "Step 4 - recall: the Bookmark type from memory",
+  "mode": "recall",
+  "file": "bookmark.go",
+  "intro": [
+    "Write step 3's `bookmark.go` again, from memory.",
+    "There is no ghost text and nothing turns red.",
+    "",
+    "It needs a `Bookmark` struct with fields `ID` (int),",
+    "`URL` and `Title` (string) and `Created` (`time.Time`),",
+    "tagged so JSON calls them `id`, `url`, `title` and",
+    "`created`, and leaves `title` out when it is empty.",
+    "",
+    "Press `<F6>` to submit: `go vet` and the step's hidden",
+    "tests decide. If they fail, fix it and submit again."
+  ]
+}

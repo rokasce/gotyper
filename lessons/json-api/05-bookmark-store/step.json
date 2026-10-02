@@ -1,0 +1,23 @@
+{
+  "title": "Step 5 - an in-memory store guarded by a mutex",
+  "mode": "type-along",
+  "file": "store.go",
+  "intro": [
+    "`Store` keeps bookmarks in memory and picks their ids.",
+    "",
+    "An HTTP server runs each request in its own goroutine,",
+    "so `Add` may run twice at once. Both could read the same",
+    "length and hand out the same id. `sync.Mutex` lets one",
+    "goroutine at a time in: `Lock`, then `defer Unlock` so",
+    "every return lets go. `List` returns a copy, so callers",
+    "never read the slice while it is being changed.",
+    "",
+    "`Get` returns `(Bookmark, bool)`, the comma-ok form, like",
+    "reading a map: `b, ok := s.Get(id)`. The bool says",
+    "whether it was found, so the zero `Bookmark` is never",
+    "mistaken for a real one.",
+    "",
+    "The zero `Store` is ready to use: no constructor needed."
+  ],
+  "carry": ["03-bookmark-type"]
+}
