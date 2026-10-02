@@ -13,11 +13,7 @@ import (
 // lessons is the repository's lessons directory, loaded once. The tests
 // play its first step, json-api/01-greet-handler (28 lines of handler.go).
 var lessons = func() lesson.Library {
-	root, err := lesson.FindRoot(".")
-	if err != nil {
-		panic(err)
-	}
-	lib, err := lesson.Load(os.DirFS(root))
+	lib, err := lesson.Load(os.DirFS("../../lessons"))
 	if err != nil {
 		panic(err)
 	}

@@ -148,27 +148,6 @@ func (l Library) First() (Step, bool) {
 	return Step{}, false
 }
 
-// FindRoot looks for a directory named "lessons" in start and then in each of
-// its parents, and returns the first one it finds. It lets the engine find
-// the repository's lessons when run from anywhere inside the repository.
-func FindRoot(start string) (string, error) {
-	dir, err := filepath.Abs(start)
-	if err != nil {
-		return "", err
-	}
-	for {
-		candidate := filepath.Join(dir, "lessons")
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir { // reached the filesystem root
-			return "", fmt.Errorf("no lessons directory in %s or any parent directory", start)
-		}
-		dir = parent
-	}
-}
-
 // slug is the shape of a track directory name and of the part of a step
 // directory name after its number: lowercase words joined by dashes.
 const slug = `[a-z0-9]+(-[a-z0-9]+)*`

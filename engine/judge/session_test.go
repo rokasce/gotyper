@@ -13,11 +13,7 @@ import (
 // demoStep is the first step of the repository's lessons: 28 lines of
 // handler.go, starting with "package main".
 var demoStep = func() lesson.Step {
-	root, err := lesson.FindRoot(".")
-	if err != nil {
-		panic(err)
-	}
-	lib, err := lesson.Load(os.DirFS(root))
+	lib, err := lesson.Load(os.DirFS("../../lessons"))
 	if err != nil {
 		panic(err)
 	}

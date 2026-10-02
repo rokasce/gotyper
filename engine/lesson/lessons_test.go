@@ -23,10 +23,7 @@ func TestLessonsOnDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the go command is needed to check lessons: %v", err)
 	}
-	root, err := FindRoot(".")
-	if err != nil {
-		t.Fatal(err)
-	}
+	const root = "../../lessons"
 	lib, err := Load(os.DirFS(root))
 	if err != nil {
 		t.Fatalf("lessons in %s do not load:\n%v", root, err)

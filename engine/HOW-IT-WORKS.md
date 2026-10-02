@@ -26,10 +26,13 @@ Packages only depend downwards: `main` → `protocol` → `judge` → `lesson`.
 
 ## Loading the lessons
 
-The engine reads lessons from the `lessons/` directory at the repository
-root, or from the directory given with `--lessons DIR`. Without the flag,
-`lesson.FindRoot` looks for a `lessons` directory in the working directory
-and then in each parent, so `go run` from `engine/` finds it.
+The engine reads lessons from the directory given with `--lessons DIR`.
+Without the flag it reads `../lessons` next to its own executable, after
+resolving symlinks, which is the repository's `lessons/` when the binary is
+built into `<repo>/bin/` as the Neovim plugin does. If that directory is
+missing or does not load, the engine exits with an error naming the path it
+tried. `go run` builds the binary in a temporary directory, so from `engine/`
+pass `--lessons ../lessons`.
 
 `lesson.Load` takes an `fs.FS`, the standard library's interface for a
 read-only file tree. `main` passes `os.DirFS(dir)`, a real directory. The
@@ -125,8 +128,8 @@ From the `engine/` directory:
 
 ```sh
 go test ./...                              # all tests
-go run ./cmd/gotyper-engine --selftest     # list the lessons, play the first step, print a summary
-go build -o gotyper-engine ./cmd/gotyper-engine
+go run ./cmd/gotyper-engine --lessons ../lessons --selftest  # list the lessons, play the first step, print a summary
+go build -o ../bin/gotyper-engine ./cmd/gotyper-engine     # finds ../lessons on its own
 ```
 
 Pipe JSON lines in and read the answers:
@@ -139,10 +142,10 @@ printf '%s\n' \
   '{"id":4,"op":"update","lines":["packx"],"keys":5,"cursor":[0,5]}' \
   '{"id":5,"op":"update","lines":["package main"],"keys":13,"cursor":[0,12]}' \
   '{"id":6,"op":"restart"}' \
-  | go run ./cmd/gotyper-engine
+  | go run ./cmd/gotyper-engine --lessons ../lessons
 ```
 
-You can also run it interactively: start `./gotyper-engine`, paste one request
+You can also run it interactively: start `../bin/gotyper-engine`, paste one request
 per line, and press Ctrl-D to end. Things worth trying:
 
 - Send `start` before `hello` to get `handshake_required`.
@@ -157,4 +160,4 @@ per line, and press Ctrl-D to end. Things worth trying:
 - Indent a line with spaces instead of tabs. Nothing turns red.
 
 Pipe the output through `jq` to make it readable, for example
-`| go run ./cmd/gotyper-engine | jq -c '.render.stats'`.
+`| go run ./cmd/gotyper-engine --lessons ../lessons | jq -c '.render.stats'`.
