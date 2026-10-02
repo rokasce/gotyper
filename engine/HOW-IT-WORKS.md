@@ -139,7 +139,8 @@ and do the step's hidden tests pass?
 
 1. **The plugin sends `check`** with the whole buffer:
    `{"id":9,"op":"check","lines":["package main",...]}`. It does this by itself
-   when a type-along step's text matches, and when the learner presses `<F6>`.
+   when a type-along step's text matches, and when the learner presses `<F6>`
+   in a recall step.
 2. **`handleLine` sees `op` is `check`** (`protocol/server.go`). Running the go
    command takes a second or more, and the learner may keep typing meanwhile,
    so it is not answered in line. `checkJob` reads the step being played and
@@ -170,7 +171,12 @@ a few seconds; after that the go command reuses them and a check takes about
 one second. When a step starts, `prewarm` runs a check of the step's own
 target in the background just to fill the cache. When stdin closes, `Serve`
 cancels a pre-warm still running (through `warmCtx`) and waits for the
-checks still running, so they are answered.
+checks still running, so they are answered. Neovim's `jobstop` also sends
+SIGTERM, which would end the engine before any cleanup ran, so `main` catches
+it with `signal.NotifyContext` and passes that context to `NewServer`. When
+it is cancelled, `Serve` returns without waiting for more input, the running
+checks and pre-warm are killed, and `check.Run` still removes their
+temporary directories.
 
 ## The Neovim side
 
@@ -218,8 +224,11 @@ What happens when the learner presses the restart key (`<F5>`):
 What happens when a check runs:
 
 1. In a type-along step, the render that says `done` makes the plugin leave
-   insert mode and call `run_check()` in `lua/gotyper/init.lua`. `<F6>`
-   (`:GotyperSubmit`) calls it too, in either mode of step.
+   insert mode and call `run_check()` in `lua/gotyper/init.lua`. In a recall
+   step `<F6>` (`:GotyperSubmit`) calls it; in a type-along step `<F6>` only
+   says that the step is checked when it is finished. Checking early there
+   could race the finishing keystroke: the early check's answer would arrive
+   for unfinished code after the step was done.
 2. `run_check()` shows "Running go vet + go test..." in the panel and sends
    `check` with the buffer. Updates go on being sent and painted meanwhile.
 3. When the answer comes, `show_result()` fills the panel: PASS or FAIL, the

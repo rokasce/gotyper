@@ -193,10 +193,10 @@ fast as well, `start` pre-warms the cache: it checks the step's own target
 in the background and throws the result away. The first `go vet` + `go test`
 on an empty cache takes a few seconds; later ones take about one.
 
-`check` never changes the session. In a type-along step it is an early
-look; the step still completes when the text matches. In a recall step a
-passing check is what completes the step; the front end decides that from
-`ok`.
+`check` never changes the session. The front end sends it for a type-along
+step once the text matches, and for a recall step when the learner submits.
+In a recall step a passing check is what completes the step; the front end
+decides that from `ok`.
 
 ## Ordering
 

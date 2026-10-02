@@ -95,6 +95,14 @@ key("<F2>")
 s = wait(function(st) return st.panel_open end, 5000)
 check(s.panel_open, "<F2> shows it again")
 check(s.keys == 7, "the panel key is not counted as typing")
+-- <F6> submits recall steps only; a type-along step is checked by itself
+-- when its text matches, so here it runs no check.
+key("<F6>")
+vim.uv.sleep(300)
+s = state()
+check(not s.checking and s.check == nil and s.panel_title ~= "checking",
+  "<F6> runs no check in a type-along step")
+check(s.keys == 7 and rq("nvim_get_mode").mode == "i", "and the learner goes on typing")
 
 -- 4. Restart throws the attempt away: empty buffer, no red, counts back to 0.
 key("<F5>")

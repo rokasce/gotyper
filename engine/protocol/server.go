@@ -28,6 +28,9 @@ type Server struct {
 	// background counts the goroutines running checks and pre-warms, so
 	// Serve can wait for them before it returns.
 	background sync.WaitGroup
+	// ctx is the context given to NewServer. Cancelling it stops every
+	// check and pre-warm still running and makes Serve return.
+	ctx context.Context
 	// warmCtx is cancelled by stopWarm when the input ends, which stops a
 	// pre-warm that is still running: nobody is left to benefit from it.
 	warmCtx  context.Context
@@ -36,9 +39,19 @@ type Server struct {
 
 // NewServer returns a server that offers the steps in lib and runs checks
 // with gocache as the go build cache (empty: the go command's default).
-func NewServer(lib lesson.Library, gocache string) *Server {
-	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{lib: lib, gocache: gocache, warmCtx: ctx, stopWarm: cancel}
+// Cancelling ctx stops the server: running checks and pre-warms are killed
+// (their temporary directories are still removed) and Serve returns. The
+// engine cancels it when it is told to stop with SIGTERM or an interrupt.
+func NewServer(ctx context.Context, lib lesson.Library, gocache string) *Server {
+	warmCtx, stopWarm := context.WithCancel(ctx)
+	return &Server{lib: lib, gocache: gocache, ctx: ctx, warmCtx: warmCtx, stopWarm: stopWarm}
+}
+
+// readResult is one ReadBytes call's result, passed from Serve's reading
+// goroutine to its loop.
+type readResult struct {
+	line []byte
+	err  error
 }
 
 // lineWriter writes response lines. Checks answer from their own goroutines,
@@ -82,8 +95,11 @@ func (lw *lineWriter) failed() error {
 // why a check's answer can come after the answers to later requests. When
 // the input ends, Serve stops any pre-warm and waits for the checks still
 // running, so every check is answered before it returns.
+//
+// When the server's context is cancelled, Serve returns nil at once without
+// waiting for more input; the checks still running are killed, and Serve
+// waits for them to clean up.
 func (s *Server) Serve(r io.Reader, w io.Writer) error {
-	in := bufio.NewReader(r)
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false) // keep < > & readable; this isn't HTML
 	out := &lineWriter{enc: enc}
@@ -91,10 +107,35 @@ func (s *Server) Serve(r io.Reader, w io.Writer) error {
 		s.stopWarm()
 		s.background.Wait()
 	}()
+	// Reading blocks until a line arrives, and a cancelled context cannot
+	// interrupt a read. So reading happens on a goroutine of its own, and
+	// the loop below waits for either the next line or the cancellation.
+	reads := make(chan readResult)
+	go func() {
+		in := bufio.NewReader(r)
+		for {
+			// ReadBytes (rather than bufio.Scanner) has no line-length
+			// limit, so even a huge buffer arrives as one request.
+			line, err := in.ReadBytes('\n')
+			select {
+			case reads <- readResult{line, err}:
+			case <-s.ctx.Done():
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
 	for {
-		// ReadBytes (rather than bufio.Scanner) has no line-length
-		// limit, so even a huge buffer arrives as one request.
-		line, readErr := in.ReadBytes('\n')
+		var line []byte
+		var readErr error
+		select {
+		case rr := <-reads:
+			line, readErr = rr.line, rr.err
+		case <-s.ctx.Done():
+			return nil
+		}
 		if len(bytes.TrimSpace(line)) > 0 {
 			s.handleLine(line, out.send)
 			if err := out.failed(); err != nil {
@@ -216,10 +257,10 @@ func (s *Server) hello(req Request) Response {
 // goroutine while the server goes on to the next request, even if that
 // request starts a different step.
 func (s *Server) checkJob(req Request) func() Response {
-	step, gocache := s.session.Step(), s.gocache
+	ctx, step, gocache := s.ctx, s.session.Step(), s.gocache
 	source := strings.Join(req.Lines, "\n") + "\n" // a file ends in a newline
 	return func() Response {
-		res := check.Run(context.Background(), step, source, gocache)
+		res := check.Run(ctx, step, source, gocache)
 		return Response{ID: req.ID, Op: req.Op, Check: &res}
 	}
 }

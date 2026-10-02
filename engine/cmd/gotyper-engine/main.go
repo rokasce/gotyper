@@ -15,11 +15,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/rokasce/gotyper/engine/lesson"
 	"github.com/rokasce/gotyper/engine/protocol"
@@ -63,7 +66,14 @@ func run(args []string) int {
 	}
 	// Normal mode. Anything written to stdout must be a protocol line, so
 	// diagnostics go to stderr only.
-	if err := protocol.NewServer(lib, goCacheDir()).Serve(os.Stdin, os.Stdout); err != nil {
+	//
+	// Neovim's jobstop sends SIGTERM, which by default ends a Go program on
+	// the spot, before any deferred cleanup runs. Catching it (and Ctrl-C)
+	// in a context instead lets the server kill running checks and remove
+	// their temporary directories before the engine exits.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
+	if err := protocol.NewServer(ctx, lib, goCacheDir()).Serve(os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "gotyper-engine:", err)
 		return 1
 	}

@@ -2,10 +2,14 @@ package protocol
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rokasce/gotyper/engine/lesson"
 )
@@ -30,7 +34,7 @@ const (
 func serve(t *testing.T, input string) []Response {
 	t.Helper()
 	var out strings.Builder
-	if err := NewServer(lessons, "").Serve(strings.NewReader(input), &out); err != nil {
+	if err := NewServer(context.Background(), lessons, "").Serve(strings.NewReader(input), &out); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	var resps []Response
@@ -225,7 +229,7 @@ func TestStartWithoutIDPicksTheFirstStep(t *testing.T) {
 func TestStartWithNoLessons(t *testing.T) {
 	var out strings.Builder
 	in := hello + `{"id":2,"op":"start"}` + "\n" + `{"id":3,"op":"list"}` + "\n"
-	if err := NewServer(lesson.Library{}, "").Serve(strings.NewReader(in), &out); err != nil {
+	if err := NewServer(context.Background(), lesson.Library{}, "").Serve(strings.NewReader(in), &out); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
@@ -301,5 +305,55 @@ func TestRecallStep(t *testing.T) {
 	}
 	if c := resps[3].Check; c == nil || c.OK || c.Stage != "test" || !strings.Contains(c.Output, "did you return?") {
 		t.Fatalf("check without the return = %+v", c)
+	}
+}
+
+// TestCancelStopsChecksAndCleansUp cancels the server's context while a
+// check runs and the input is still open, as SIGTERM does in the engine.
+// Serve must return without waiting for more input, and the check's
+// temporary module must be removed.
+func TestCancelStopsChecksAndCleansUp(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go vet and go test")
+	}
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp) // os.MkdirTemp, used by check.Run, creates its directories here
+	checkDirs := func() []string {
+		dirs, err := filepath.Glob(filepath.Join(tmp, "gotyper-check-*"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dirs
+	}
+
+	step, _ := lessons.Step(firstStep)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	in, feed := io.Pipe()
+	defer feed.Close()
+	served := make(chan error, 1)
+	go func() { served <- NewServer(ctx, lessons, t.TempDir()).Serve(in, io.Discard) }()
+	go io.WriteString(feed, hello+
+		`{"id":2,"op":"start","step":"`+firstStep+`"}`+"\n"+
+		`{"id":3,"op":"check","lines":`+linesJSON(t, step.Target)+`}`+"\n")
+
+	deadline := time.Now().Add(30 * time.Second)
+	for len(checkDirs()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("no check started")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Fatalf("Serve: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("Serve did not return after the context was cancelled")
+	}
+	if dirs := checkDirs(); len(dirs) != 0 {
+		t.Fatalf("check directories left behind: %v", dirs)
 	}
 }

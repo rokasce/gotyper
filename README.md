@@ -34,7 +34,7 @@ Some steps are **recall** steps: you write the file from memory, with no ghost t
 | Key (normal or insert mode) | Command | What it does |
 |---|---|---|
 | `<F5>` | `:GotyperRestart` | Throw the attempt away and type the step again from an empty buffer. The error count, keystrokes and timer start over. |
-| `<F6>` | `:GotyperSubmit` | Compile and test what is in the buffer now. This is how you finish a recall step. In a type-along step it is an early check, and the step still finishes when the text matches. |
+| `<F6>` | `:GotyperSubmit` | Compile and test what is in the buffer now. This is how you finish a recall step. A type-along step is checked automatically when its text matches, so there it does nothing. |
 | `<F2>` | `:GotyperPanel` | Hide or show the explanation panel, for when it covers code in a small terminal. |
 | `:tabclose` or `:q` | | End the game. The engine stops and the game buffer is wiped. |
 

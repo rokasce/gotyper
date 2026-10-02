@@ -20,7 +20,7 @@ local api, engine, ui = vim.api, require("gotyper.engine"), require("gotyper.ui"
 -- :GotyperPanel and :GotyperSubmit yourself.
 local RESTART_KEY = "<F5>" -- throw the attempt away and type the step again
 local PANEL_KEY = "<F2>" -- show or hide the explanation panel
-local SUBMIT_KEY = "<F6>" -- compile and test what is typed (go vet + go test)
+local SUBMIT_KEY = "<F6>" -- recall steps: compile and test what is typed (go vet + go test)
 
 -- INDENTEXPR is the type-along indentexpr: indentation comes from the engine
 -- through M.indent.
@@ -54,13 +54,13 @@ local ns_key = api.nvim_create_namespace("gotyper_keys")
 --   wiping        the game buffer is being wiped (see install_hooks)
 local S
 
--- help_lines lists the game keys, for the bottom of the panel.
+-- help_lines lists the game keys, for the bottom of the panel. Only a
+-- recall step is submitted by hand.
 local function help_lines()
-  return {
-    "",
-    SUBMIT_KEY .. "  submit: go vet + go test",
-    RESTART_KEY .. "  restart the step    " .. PANEL_KEY .. "  hide/show this panel",
-  }
+  local lines = { "" }
+  if S.recall then lines[#lines + 1] = SUBMIT_KEY .. "  submit: go vet + go test" end
+  lines[#lines + 1] = RESTART_KEY .. "  restart the step    " .. PANEL_KEY .. "  hide/show this panel"
+  return lines
 end
 
 -- show_panel shows `lines` in the panel unless the learner has hidden it. The
@@ -83,8 +83,8 @@ local function update_winbar()
 end
 
 -- show_result shows a check result in the panel. A pass completes a recall
--- step; in a type-along step the step is complete when its text matches, so
--- a pass there before the end (an early submit) changes nothing.
+-- step. A type-along step is only checked once its text matches, so it is
+-- already complete.
 local function show_result(c)
   S.check = c
   if c.ok and S.recall and not S.done then
@@ -103,14 +103,12 @@ local function show_result(c)
   -- line per output line.
   vim.list_extend(lines, vim.split(c.output ~= "" and c.output or "(no output)", "\n"))
   lines[#lines + 1] = ""
-  if not c.ok then
+  if not c.ok and S.recall then
     lines[#lines + 1] = "Fix it and press " .. SUBMIT_KEY .. " to check again."
-  elseif S.done then
-    lines[#lines + 1] = "Press " .. RESTART_KEY .. " to do the step again."
   else
-    lines[#lines + 1] = "It already works. Keep typing to finish the step."
+    lines[#lines + 1] = "Press " .. RESTART_KEY .. " to do the step again."
   end
-  local title = not c.ok and "check failed" or S.done and "step passed" or "check passed"
+  local title = c.ok and "step passed" or "check failed"
   S.panel_hidden = false -- the result is worth showing even if the intro was hidden
   show_panel(lines, title, c.ok and "GotyperPass" or "GotyperFail")
   update_winbar()
@@ -313,7 +311,7 @@ local function install_hooks()
 
   vim.keymap.set({ "n", "i" }, RESTART_KEY, M.restart, { buffer = buf, desc = "gotyper: restart the step" })
   vim.keymap.set({ "n", "i" }, PANEL_KEY, M.toggle_panel, { buffer = buf, desc = "gotyper: toggle the explanation panel" })
-  vim.keymap.set({ "n", "i" }, SUBMIT_KEY, M.submit, { buffer = buf, desc = "gotyper: compile and test what is typed" })
+  vim.keymap.set({ "n", "i" }, SUBMIT_KEY, M.submit, { buffer = buf, desc = "gotyper: submit a recall step (go vet + go test)" })
 
   local group = api.nvim_create_augroup("gotyper_session", { clear = true })
   S.augroup = group
@@ -462,12 +460,15 @@ function M.restart()
 end
 
 -- submit compiles and tests what is typed (go vet + go test) and shows the
--- result. In a recall step a pass completes the step; a fail shows what went
--- wrong and the learner can keep editing. In a type-along step it is an early
--- check: the step still completes when the text matches.
+-- result, in a recall step. A pass completes the step; a fail shows what went
+-- wrong and the learner can keep editing. A type-along step is not submitted:
+-- it is checked by itself when its text matches (see on_done).
 function M.submit()
   if not (S and S.info) then
     return vim.notify("gotyper: no game is running; start one with :Gotyper", vim.log.levels.WARN)
+  end
+  if not S.recall then
+    return vim.notify("gotyper: type-along steps are checked automatically when finished", vim.log.levels.INFO)
   end
   run_check()
 end
