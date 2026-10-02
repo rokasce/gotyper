@@ -29,7 +29,7 @@ To install it with [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 When every line matches, gotyper compiles and tests what you typed (`go vet`, then the step's hidden tests with `go test`) and shows PASS or FAIL with the go output in the panel. The first check builds the standard library packages the step uses, which takes a few seconds; later checks take about one.
 
-Some steps are **recall** steps: you write the file from memory, with no ghost text and nothing turning red, and the bar shows only keystrokes and time. Press `<F6>` to submit. If `go vet` or the tests fail, the panel shows why; fix the code and submit again. The step is done when the check passes; if you edit while the check runs, submit again so the edited code is checked. `:Gotyper` starts the first step; until there is a step picker, start the recall step with `:lua require("gotyper").start("json-api/02-greet-handler-recall")`.
+Some steps are **recall** steps: you write the file from memory, with no ghost text and nothing turning red, and the bar shows only keystrokes and time. Press `<F6>` to submit. If `go vet` or the tests fail, the panel shows why; fix the code and submit again. The step is done when the check passes; if you edit while the check runs, submit again so the edited code is checked. Pick a recall step from `:Gotyper` like any other, or start one directly, for example `:Gotyper json-api/02-greet-handler-recall`.
 
 | Key (normal or insert mode) | Command | What it does |
 |---|---|---|
