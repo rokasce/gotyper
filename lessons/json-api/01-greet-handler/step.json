@@ -1,0 +1,15 @@
+{
+  "title": "Step 1 - a JSON handler with errors as values",
+  "mode": "type-along",
+  "file": "handler.go",
+  "intro": [
+    "Type the ghost text. Mistakes turn red;",
+    "fix them with any vim motion.",
+    "",
+    "`greet` returns `(greeting, error)` instead of panicking:",
+    "the caller decides what an error means. `greetHandler`",
+    "maps it to HTTP 400, and encodes success as JSON.",
+    "",
+    "Indentation is inserted for you on `<Enter>`."
+  ]
+}

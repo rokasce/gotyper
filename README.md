@@ -8,10 +8,14 @@ The Go engine lives in [`engine/`](engine/) (Go 1.26). It judges what you type a
 
 ```sh
 cd engine
-go test ./...                                   # run the tests
-go run ./cmd/gotyper-engine --selftest          # play the built-in step and print a summary
-go build -o gotyper-engine ./cmd/gotyper-engine # build the binary
+go test ./...                                              # run the tests
+go run ./cmd/gotyper-engine --lessons ../lessons --selftest # play the first lesson step and print a summary
+go build -o ../bin/gotyper-engine ./cmd/gotyper-engine     # build the binary; it reads ../lessons beside bin/
 ```
 
 - [`engine/HOW-IT-WORKS.md`](engine/HOW-IT-WORKS.md): a walkthrough of the code and how to drive the engine by hand.
 - [`engine/PROTOCOL.md`](engine/PROTOCOL.md): the wire protocol.
+
+## Lessons
+
+The lessons live in [`lessons/`](lessons/), one directory per track and one per step. [`lessons/README.md`](lessons/README.md) describes the format. `go test ./...` in `engine/` compiles and tests every step.
