@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DELAY="${1:-20}"
 SOCK="$(mktemp -u "${TMPDIR:-/tmp}/gotyper-test-XXXXXX.sock")"
 nvim --headless --clean --listen "$SOCK" \
-  -c "set rtp^=$ROOT" -c "runtime plugin/gotyper.lua" -c Gotyper >/dev/null 2>&1 &
+  -c "set rtp^=$ROOT" -c "runtime plugin/gotyper.lua" -c "Gotyper json-api/01-greet-handler" >/dev/null 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; rm -f "$SOCK"' EXIT
 nvim --clean -l "$ROOT/test/drive.lua" "$SOCK" "$ROOT" "$DELAY"

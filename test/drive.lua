@@ -151,12 +151,38 @@ check(rq("nvim_call_function", "jobwait", { { chan }, 1000 })[1] ~= -1, "the eng
 check(lua("return pcall(vim.api.nvim_get_autocmds, { group = 'gotyper_session' })") == false, "its autocmds are removed")
 check(lua("return #vim.api.nvim_list_tabpages()") == 1, "and its tab is gone")
 
--- 7. A front end speaking another protocol version gets a clear message.
+-- 7. :Gotyper completes step ids, and without an argument offers the steps
+--    in vim.ui.select. The test stands in for the picker by calling its
+--    selection callback, as a learner choosing an item would.
+local step_id = "json-api/01-greet-handler"
+check(vim.tbl_contains(lua("return vim.fn.getcompletion('Gotyper json', 'cmdline')"), step_id),
+  ":Gotyper completes step ids")
+lua([[
+  vim.ui.select = function(items, opts, on_choice)
+    _G.gotyper_pick = { items = items, labels = vim.tbl_map(opts.format_item, items) }
+    _G.gotyper_choose = on_choice
+  end
+  vim.cmd('Gotyper')
+]])
+local pick = lua("return _G.gotyper_pick")
+check(pick.items[1].id == step_id, "the picker offers the steps by id")
+check(pick.labels[1] == "json-api: Step 1 - a JSON handler with errors as values (type-along)",
+  "each step shows its track, title and mode (" .. pick.labels[1] .. ")")
+lua("_G.gotyper_choose(nil)")
+check(state() == nil and #rq("nvim_list_tabpages") == 1, "cancelling the picker starts nothing")
+lua("_G.gotyper_choose(_G.gotyper_pick.items[1])")
+s = wait(function(st) return st.info ~= vim.NIL and st.info ~= nil and st.last ~= vim.NIL and st.last ~= nil end, 10000)
+check(s.info.step == step_id, "choosing a step starts it")
+rq("nvim_command", "tabclose")
+vim.uv.sleep(200)
+check(state() == nil, "(closed it again)")
+
+-- 8. A front end speaking another protocol version gets a clear message.
 lua([[
   _G.gotyper_msgs = {}
   vim.notify = function(msg) table.insert(_G.gotyper_msgs, msg) end
   require('gotyper.engine').PROTOCOL = 2
-  vim.cmd('Gotyper')
+  vim.cmd('Gotyper json-api/01-greet-handler')
 ]])
 local msgs
 for _ = 1, 100 do

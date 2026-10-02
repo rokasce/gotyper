@@ -60,6 +60,41 @@ function M.ensure()
   return bin
 end
 
+-- mismatch_message explains a failed hello handshake to the learner: which
+-- engine was found and how to rebuild it. `hello` is the hello response.
+function M.mismatch_message(hello)
+  local found = hello.hello and (" (found engine %s, protocol %d)"):format(hello.hello.engine, hello.hello.protocol) or ""
+  return ("gotyper: the engine and the plugin do not match%s:\n%s\n"
+    .. "Rebuild the engine by deleting %s/bin and running :Gotyper again."):format(found, hello.error.message, root)
+end
+
+-- list asks the engine at `bin` which tracks and steps it offers (the `list`
+-- op) and returns its tracks: { { id = ..., steps = { { id, title, mode }, ... } }, ... }.
+-- Unlike connect, it runs a short-lived engine and waits for it, because
+-- command-line completion must answer before Neovim draws the next key.
+-- On failure it returns nil and a message for the learner.
+function M.list(bin)
+  -- The handshake must come first, then list. Closing stdin (vim.system does
+  -- that once the input is written) makes the engine exit after answering.
+  local input = vim.json.encode({ id = 1, op = "hello", protocol = M.PROTOCOL }) .. "\n"
+    .. vim.json.encode({ id = 2, op = "list" }) .. "\n"
+  local r = vim.system({ bin }, { stdin = input }):wait()
+  -- Answers come in request order: the first line answers hello, the second list.
+  local lines = vim.split(r.stdout or "", "\n", { trimempty = true })
+  local answers = {}
+  for i = 1, 2 do
+    local ok, resp = pcall(vim.json.decode, lines[i] or "", { luanil = { object = true, array = true } })
+    if not ok or type(resp) ~= "table" then
+      return nil, "gotyper: the engine did not list its steps:\n" .. (r.stderr or "")
+    end
+    answers[i] = resp
+  end
+  local hello, list = answers[1], answers[2]
+  if hello.error then return nil, M.mismatch_message(hello) end
+  if list.error then return nil, "gotyper engine: " .. list.error.message end
+  return list.list.tracks
+end
+
 -- connect starts the engine binary as a job and returns a client with:
 --
 --   client.request(op, fields, cb)  send {"id":N,"op":op,...fields}; cb(response)

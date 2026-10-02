@@ -25,7 +25,7 @@ To install it with [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ### How a game works
 
-`:Gotyper` opens a new tab. Type the italic ghost text. Mistakes turn red; fix them with any vim motion. The bar at the top shows WPM, accuracy, keystrokes, finished lines and charged errors. You never type indentation: pressing `<Enter>` inserts the line's indentation for you. For this game buffer only, gotyper turns off auto-pairing, completion, Copilot and auto-formatting, and keeps gopls from attaching. Your config is left alone everywhere else.
+`:Gotyper` lists the lesson steps, each with its track, title and mode, and starts the one you pick. `:Gotyper <step-id>` starts a step directly; `<Tab>` completes the ids, such as `json-api/01-greet-handler`. The game opens in a new tab. Type the italic ghost text. Mistakes turn red; fix them with any vim motion. The bar at the top shows WPM, accuracy, keystrokes, finished lines and charged errors. You never type indentation: pressing `<Enter>` inserts the line's indentation for you. For this game buffer only, gotyper turns off auto-pairing, completion, Copilot and auto-formatting, and keeps gopls from attaching. Your config is left alone everywhere else.
 
 | Key (normal or insert mode) | Command | What it does |
 |---|---|---|
