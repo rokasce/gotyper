@@ -1,0 +1,23 @@
+{
+  "title": "Step 6 - recall: the store from memory",
+  "mode": "recall",
+  "file": "store.go",
+  "intro": [
+    "Write step 5's `store.go` again, from memory. Your",
+    "`Bookmark` from step 3 is already in the module.",
+    "",
+    "It needs a `Store` whose zero value is ready to use,",
+    "guarded by a `sync.Mutex`, with:",
+    "",
+    "- `Add(b Bookmark) Bookmark`, which gives `b` the next",
+    "  id (1, 2, 3, ...), stores it and returns it;",
+    "- `Get(id int) (Bookmark, bool)`, false when not found;",
+    "- `List() []Bookmark`, a copy, in id order.",
+    "",
+    "A hidden test calls `Add` from many goroutines at once.",
+    "",
+    "Press `<F6>` to submit: `go vet` and the step's hidden",
+    "tests decide. If they fail, fix it and submit again."
+  ],
+  "carry": ["03-bookmark-type"]
+}
