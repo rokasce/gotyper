@@ -6,7 +6,6 @@
 //
 //	gotyper-engine              serve the protocol on stdin/stdout
 //	gotyper-engine --selftest   play the built-in step in-process and report
-//	gotyper-engine --version    print the engine and protocol versions
 package main
 
 import (
@@ -24,7 +23,7 @@ func main() {
 // run is main without the os.Exit, returning the exit code instead.
 func run(args []string) int {
 	if len(args) > 1 {
-		fmt.Fprintln(os.Stderr, "usage: gotyper-engine [--selftest | --version]")
+		fmt.Fprintln(os.Stderr, "usage: gotyper-engine [--selftest]")
 		return 2
 	}
 	if len(args) == 1 {
@@ -35,11 +34,8 @@ func run(args []string) int {
 				return 1
 			}
 			return 0
-		case "--version":
-			fmt.Printf("gotyper-engine %s (protocol %d)\n", protocol.EngineVersion, protocol.Version)
-			return 0
 		default:
-			fmt.Fprintf(os.Stderr, "unknown flag %q\nusage: gotyper-engine [--selftest | --version]\n", args[0])
+			fmt.Fprintf(os.Stderr, "unknown flag %q\nusage: gotyper-engine [--selftest]\n", args[0])
 			return 2
 		}
 	}
