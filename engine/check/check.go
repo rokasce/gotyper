@@ -34,14 +34,22 @@ const (
 // check that never answers would leave the learner waiting with no result.
 const Timeout = time.Minute
 
+// TestTimeout is go test's own -timeout, kept below Timeout. When a test
+// runs too long, the test binary then panics and exits by itself, with a
+// stack trace showing where it was stuck. Stopping the go command would not
+// stop the test binary it started.
+const TestTimeout = 50 * time.Second
+
 // MaxOutputLines is how many lines of go output a Result keeps. Compiler and
 // test failures put the useful part first; the rest would not fit beside the
 // code anyway.
 const MaxOutputLines = 20
 
 // StopGrace is how long a go command that is told to stop (its check was
-// cancelled or timed out) gets to stop by itself before it is killed.
-const StopGrace = 2 * time.Second
+// cancelled or timed out) gets to stop by itself before it is killed. It is
+// well under the 2 seconds Neovim's jobstop waits before killing the engine,
+// so the check still has time to remove its temporary directory.
+const StopGrace = time.Second
 
 // Result is the outcome of one check.
 type Result struct {
@@ -98,12 +106,18 @@ func run(ctx context.Context, step lesson.Step, source, gocache string) Result {
 	var out []byte
 	for _, stage := range []string{StageVet, StageTest} {
 		cmdCtx, cancel := context.WithTimeout(ctx, Timeout)
-		cmd := exec.CommandContext(cmdCtx, gobin, stage, "./...")
+		args := []string{stage, "./..."}
+		if stage == StageTest {
+			args = []string{stage, "-timeout=" + TestTimeout.String(), "./..."}
+		}
+		cmd := exec.CommandContext(cmdCtx, gobin, args...)
 		cmd.Dir = dir
 		cmd.Env = env
 		// Stopping the go command with an interrupt rather than a kill lets
-		// it stop the programs it started and remove its own temporary
-		// work directory. If it has not exited after StopGrace, it is killed.
+		// it remove its own temporary work directory. It does not pass the
+		// interrupt on to a test binary it is running; that one ends at
+		// TestTimeout. If the go command has not exited after StopGrace, it
+		// is killed.
 		cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
 		cmd.WaitDelay = StopGrace
 		out, err = cmd.CombinedOutput()

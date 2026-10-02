@@ -157,9 +157,11 @@ and do the step's hidden tests pass?
    learner's environment from changing the result, and `GOCACHE` points at
    gotyper's own build cache (`goCacheDir` in `cmd/gotyper-engine/main.go`).
    Each command is stopped after a minute, in case the learner's code loops
-   forever. It is stopped with an interrupt, so the go command can stop its
-   own children and remove its work directory; only if it is still running
-   two seconds later is it killed.
+   forever. It is stopped with an interrupt, so the go command can remove its
+   work directory; only if it is still running one second later is it
+   killed. The interrupt does not reach a test binary the go command is
+   running, so `go test` also gets `-timeout=50s`: a looping test panics and
+   exits by itself, and its stack trace shows where it was stuck.
 5. **The output is tidied**: the temporary directory's path is cut out, so
    errors read `./handler.go:14:22: undefined: errors`, and only the first 20
    lines are kept for the panel.
