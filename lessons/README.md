@@ -36,12 +36,29 @@ A step's id is `<track>/<step directory>`, for example
 | Field | Required | Meaning |
 |---|---|---|
 | `title` | yes | Shown above the intro. |
-| `mode` | yes | How the step is played. Only `type-along` exists: the learner types over ghost text and the step is done when every line matches. `recall` is reserved for later. |
+| `mode` | yes | How the step is played: `type-along` or `recall` (below). |
 | `file` | yes | The target's file name. It must sit next to `step.json`. |
 | `intro` | no | The explanation shown beside the code, as a list of markdown lines. JSON has no multi-line strings, so each line is one list item. |
 | `carry` | no | Earlier steps of this track, by directory name, whose targets this step's module includes. |
 
 Unknown fields are an error, so a misspelling doesn't go unnoticed.
+
+The two modes:
+
+- **`type-along`**: the learner types over the target shown as ghost text,
+  and the step is done when every line matches. The game then runs `go vet`
+  and `go test` on it and shows the result.
+- **`recall`**: the target is never shown. The learner writes the file from
+  memory and submits it, and the step is done when `go vet` and `go test`
+  pass on the module with their file in place of the target. The target is
+  the reference answer: `TestLessonsOnDisk` checks that it passes. Because
+  the hidden tests are all that grade a recall step, they must pin down the
+  behaviour the intro asks for. The intro should say what to write, since
+  there is no ghost text to follow.
+
+A recall step usually repeats an earlier type-along step's file. It is a
+step of its own, with its own copy of the target and hidden files, so it
+does not carry the step it recalls (that file would clash with its target).
 
 The step directory holds only `step.json`, the target and `hidden/`. Any
 other file there is an error.
@@ -72,6 +89,7 @@ go test ./lesson -run TestLessonsOnDisk -v
 ```
 
 For every step this assembles the module in a temporary directory and runs
-`go vet ./...` and `go test ./...` on it. It also checks that a Go target is
+`go vet ./...` and `go test ./...` on it, with the same code (`engine/check`)
+that checks the learner's work in the game. It also checks that a Go target is
 gofmt-formatted, because the learner should type canonical code. A failure
 names the step id.

@@ -55,7 +55,7 @@ func TestLoadValidTrack(t *testing.T) {
 		"sub/x_test.go":   "package sub\n",
 		"testdata/in.txt": "data",
 	}
-	got := two.Module()
+	got := two.Module(two.Source())
 	if len(got) != len(want) {
 		t.Fatalf("module files = %v", got)
 	}
@@ -66,6 +66,30 @@ func TestLoadValidTrack(t *testing.T) {
 	}
 }
 
+func TestModuleTakesTheTypedSource(t *testing.T) {
+	lib, err := Load(twoSteps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, _ := lib.Step("t/02-two")
+	got := two.Module("package main // typed\n")
+	if got["b.go"] != "package main // typed\n" || got["a.go"] != "package main\n\nfunc a() {}\n" {
+		t.Fatalf("module with typed source = %v", got)
+	}
+}
+
+func TestLoadRecallStep(t *testing.T) {
+	fsys := twoSteps()
+	fsys["t/02-two/step.json"] = file(`{"title":"Two","mode":"recall","file":"b.go","carry":["01-one"]}`)
+	lib, err := Load(fsys)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if two, _ := lib.Step("t/02-two"); two.Mode != Recall {
+		t.Fatalf("mode = %q, want %q", two.Mode, Recall)
+	}
+}
+
 func TestWriteModule(t *testing.T) {
 	lib, err := Load(twoSteps())
 	if err != nil {
@@ -73,10 +97,10 @@ func TestWriteModule(t *testing.T) {
 	}
 	step, _ := lib.Step("t/02-two")
 	dir := t.TempDir()
-	if err := step.WriteModule(dir); err != nil {
+	if err := step.WriteModule(dir, step.Source()); err != nil {
 		t.Fatalf("WriteModule: %v", err)
 	}
-	for name, want := range step.Module() {
+	for name, want := range step.Module(step.Source()) {
 		got, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name)))
 		if err != nil || string(got) != want {
 			t.Errorf("%s on disk = %q, %v; want %q", name, got, err, want)
@@ -108,8 +132,8 @@ func TestLoadErrors(t *testing.T) {
 			f["t/01-one/step.json"] = file(`{"title":"One","mode":"type-along","file":"a.go","intor":[]}`)
 		}, []string{`unknown field "intor"`}},
 		{"unknown mode", func(f fstest.MapFS) {
-			f["t/01-one/step.json"] = file(`{"title":"One","mode":"recall","file":"a.go"}`)
-		}, []string{`step t/01-one: step.json: unknown mode "recall"`}},
+			f["t/01-one/step.json"] = file(`{"title":"One","mode":"race","file":"a.go"}`)
+		}, []string{`step t/01-one: step.json: unknown mode "race"`}},
 		{"missing mode", func(f fstest.MapFS) {
 			f["t/01-one/step.json"] = file(`{"title":"One","file":"a.go"}`)
 		}, []string{"mode is missing"}},
@@ -169,7 +193,7 @@ func TestLoadErrors(t *testing.T) {
 func TestLoadReportsEveryProblem(t *testing.T) {
 	fsys := twoSteps()
 	delete(fsys, "t/01-one/a.go")
-	fsys["t/02-two/step.json"] = file(`{"title":"Two","mode":"recall","file":"b.go"}`)
+	fsys["t/02-two/step.json"] = file(`{"title":"Two","mode":"race","file":"b.go"}`)
 	_, err := Load(fsys)
 	if err == nil || !strings.Contains(err.Error(), "t/01-one") || !strings.Contains(err.Error(), "t/02-two") {
 		t.Fatalf("want errors for both steps, got %v", err)

@@ -63,7 +63,7 @@ func run(args []string) int {
 	}
 	// Normal mode. Anything written to stdout must be a protocol line, so
 	// diagnostics go to stderr only.
-	if err := protocol.NewServer(lib).Serve(os.Stdin, os.Stdout); err != nil {
+	if err := protocol.NewServer(lib, goCacheDir()).Serve(os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "gotyper-engine:", err)
 		return 1
 	}
@@ -105,4 +105,19 @@ func defaultLessonsDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(filepath.Dir(exe), "..", "lessons"), nil
+}
+
+// goCacheDir returns the go build cache used for checks: gotyper/go-build
+// under the user's cache directory (~/.cache on Linux). Keeping it there
+// means packages compiled for one check are reused by every later check,
+// even across restarts of the engine, whatever GOCACHE the environment that
+// started Neovim has. The go command creates the directory when it is
+// missing. When there is no user cache directory (no $HOME, say), it returns
+// "" and checks use the go command's own default.
+func goCacheDir() string {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "gotyper", "go-build")
 }

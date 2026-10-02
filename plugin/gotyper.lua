@@ -27,3 +27,7 @@ end, { desc = "gotyper: throw away this attempt and type the step again" })
 vim.api.nvim_create_user_command("GotyperPanel", function()
   require("gotyper").toggle_panel()
 end, { desc = "gotyper: show or hide the explanation panel" })
+
+vim.api.nvim_create_user_command("GotyperSubmit", function()
+  require("gotyper").submit()
+end, { desc = "gotyper: compile and test what is typed (go vet + go test)" })

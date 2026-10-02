@@ -35,13 +35,16 @@ import (
 // Mode says how a step is played and what completes it.
 type Mode string
 
-// The modes a step can declare. Only TypeAlong exists today. A "recall"
-// mode, where the ghost text is hidden and compile+test decide completion,
-// is reserved for later and is rejected until the engine supports it.
+// The modes a step can declare.
 const (
 	// TypeAlong steps show the target as ghost text; the step is done when
 	// every typed line matches its target line exactly (indentation aside).
 	TypeAlong Mode = "type-along"
+	// Recall steps hide the target: the learner writes the file from memory
+	// and submits it, and the step is done when the submitted file passes
+	// go vet and go test. The target is only the reference answer, used to
+	// check the lesson itself.
+	Recall Mode = "recall"
 )
 
 // MetaFile is the name of the metadata file in every step directory.
@@ -84,11 +87,13 @@ func (s Step) Source() string {
 }
 
 // Module returns every file of the step's Go module, keyed by slash path:
-// the carried files, the target and the hidden files. Writing these into an
-// empty directory gives a module that go vet and go test can run on. The
-// loader has already made sure no two of them share a path.
-func (s Step) Module() map[string]string {
-	files := map[string]string{s.File: s.Source()}
+// the carried files, the step's own file and the hidden files. source is the
+// contents of the step's own file: Source() to check the lesson, or what the
+// learner typed to check their work. Writing these into an empty directory
+// gives a module that go vet and go test can run on. The loader has already
+// made sure no two of them share a path.
+func (s Step) Module(source string) map[string]string {
+	files := map[string]string{s.File: source}
 	for name, body := range s.Carried {
 		files[name] = body
 	}
@@ -98,10 +103,11 @@ func (s Step) Module() map[string]string {
 	return files
 }
 
-// WriteModule writes the files of Module into dir, creating subdirectories
-// as needed. dir should be empty, such as a fresh temporary directory.
-func (s Step) WriteModule(dir string) error {
-	for name, body := range s.Module() {
+// WriteModule writes the files of Module(source) into dir, creating
+// subdirectories as needed. dir should be empty, such as a fresh temporary
+// directory.
+func (s Step) WriteModule(dir, source string) error {
+	for name, body := range s.Module(source) {
 		p := filepath.Join(dir, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			return err
@@ -273,11 +279,11 @@ func loadStep(fsys fs.FS, dir, id string, earlier map[string]Step, failed map[st
 		fail("%s: title is empty", MetaFile)
 	}
 	switch m.Mode {
-	case TypeAlong:
+	case TypeAlong, Recall:
 	case "":
-		fail("%s: mode is missing; use %q", MetaFile, TypeAlong)
+		fail("%s: mode is missing; use %q or %q", MetaFile, TypeAlong, Recall)
 	default:
-		fail("%s: unknown mode %q; the only mode is %q", MetaFile, m.Mode, TypeAlong)
+		fail("%s: unknown mode %q; use %q or %q", MetaFile, m.Mode, TypeAlong, Recall)
 	}
 
 	if m.Intro == nil {

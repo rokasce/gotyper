@@ -170,3 +170,31 @@ func TestRestartClearsAttempt(t *testing.T) {
 		t.Fatalf("errors after retyping the typo = %d", r.Stats.Errors)
 	}
 }
+
+// TestRecallShowsNothing: a recall step hides the target, so a render has no
+// ghosts and no red, even for wrong text, and is never done by itself. Only
+// the keystrokes and the elapsed time are reported.
+func TestRecallShowsNothing(t *testing.T) {
+	step := demoStep
+	step.Mode = lesson.Recall
+	s := NewSession(step)
+	now := time.Unix(0, 0)
+	s.now = func() time.Time { return now }
+
+	r := s.Update([]string{""}, 0, [2]int{})
+	if len(r.Ghosts) != 0 || len(r.GhostLines) != 0 || r.Stats != (Stats{}) {
+		t.Fatalf("empty recall buffer: ghosts=%v ghost lines=%d stats=%+v", r.Ghosts, len(r.GhostLines), r.Stats)
+	}
+	s.Update([]string{"x"}, 1, [2]int{0, 1})
+	now = now.Add(3 * time.Second)
+	r = s.Update([]string{"xyz", "func"}, 8, [2]int{1, 4})
+	if len(r.ErrorSpans) != 0 || len(r.Ghosts) != 0 || len(r.GhostLines) != 0 || r.Done {
+		t.Fatalf("wrong recall text: spans=%v ghosts=%v ghost lines=%d done=%v", r.ErrorSpans, r.Ghosts, len(r.GhostLines), r.Done)
+	}
+	if r.Stats != (Stats{Keys: 8, Seconds: 3}) {
+		t.Fatalf("recall stats = %+v, want only keys and seconds", r.Stats)
+	}
+	if r = s.Update(step.Target, 9, [2]int{}); r.Done {
+		t.Fatal("a recall step must not be done by update; a passing check completes it")
+	}
+}

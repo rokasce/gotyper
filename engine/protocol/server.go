@@ -3,11 +3,15 @@ package protocol
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
+	"sync"
 
+	"github.com/rokasce/gotyper/engine/check"
 	"github.com/rokasce/gotyper/engine/judge"
 	"github.com/rokasce/gotyper/engine/lesson"
 )
@@ -17,13 +21,49 @@ import (
 // being played. One Server serves one front end.
 type Server struct {
 	lib     lesson.Library
+	gocache string // GOCACHE for checks; see check.Run
 	greeted bool
 	session *judge.Session // nil until the first start
+
+	// background counts the goroutines running checks and pre-warms, so
+	// Serve can wait for them before it returns.
+	background sync.WaitGroup
+	// warmCtx is cancelled by stopWarm when the input ends, which stops a
+	// pre-warm that is still running: nobody is left to benefit from it.
+	warmCtx  context.Context
+	stopWarm context.CancelFunc
 }
 
-// NewServer returns a server that offers the steps in lib.
-func NewServer(lib lesson.Library) *Server {
-	return &Server{lib: lib}
+// NewServer returns a server that offers the steps in lib and runs checks
+// with gocache as the go build cache (empty: the go command's default).
+func NewServer(lib lesson.Library, gocache string) *Server {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Server{lib: lib, gocache: gocache, warmCtx: ctx, stopWarm: cancel}
+}
+
+// lineWriter writes response lines. Checks answer from their own goroutines,
+// so the mutex makes sure two responses are never written over each other.
+// The first write error is kept for Serve to report.
+type lineWriter struct {
+	mu  sync.Mutex
+	enc *json.Encoder
+	err error
+}
+
+// send writes resp as one line, unless an earlier write already failed.
+func (lw *lineWriter) send(resp Response) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	if lw.err == nil {
+		lw.err = lw.enc.Encode(resp) // Encode writes the value followed by "\n"
+	}
+}
+
+// failed returns the first write error, or nil.
+func (lw *lineWriter) failed() error {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	return lw.err
 }
 
 // Serve reads requests from r and writes responses to w until r reaches end
@@ -35,21 +75,36 @@ func NewServer(lib lesson.Library) *Server {
 // one request. Decode it, hand it to Handle, encode the response as one line,
 // and go round again. A line that isn't valid JSON gets an error response and
 // the loop simply continues, so one bad message never kills the engine.
+//
+// The exception is check, which runs go vet and go test and takes a second
+// or more. Serve runs it on a goroutine of its own and goes straight on to
+// the next request, so updates typed meanwhile are answered at once. That is
+// why a check's answer can come after the answers to later requests. When
+// the input ends, Serve stops any pre-warm and waits for the checks still
+// running, so every check is answered before it returns.
 func (s *Server) Serve(r io.Reader, w io.Writer) error {
 	in := bufio.NewReader(r)
-	enc := json.NewEncoder(w) // Encode writes the value followed by "\n"
-	enc.SetEscapeHTML(false)  // keep < > & readable; this isn't HTML
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false) // keep < > & readable; this isn't HTML
+	out := &lineWriter{enc: enc}
+	defer func() {
+		s.stopWarm()
+		s.background.Wait()
+	}()
 	for {
 		// ReadBytes (rather than bufio.Scanner) has no line-length
 		// limit, so even a huge buffer arrives as one request.
 		line, readErr := in.ReadBytes('\n')
 		if len(bytes.TrimSpace(line)) > 0 {
-			if err := enc.Encode(s.handleLine(line)); err != nil {
+			s.handleLine(line, out.send)
+			if err := out.failed(); err != nil {
 				return fmt.Errorf("write response: %w", err)
 			}
 		}
 		if errors.Is(readErr, io.EOF) {
-			return nil // the last line may lack its "\n"; it was handled above
+			// The last line may lack its "\n"; it was handled above.
+			// The deferred wait lets running checks write their answers.
+			return nil
 		}
 		if readErr != nil {
 			return fmt.Errorf("read request: %w", readErr)
@@ -57,22 +112,38 @@ func (s *Server) Serve(r io.Reader, w io.Writer) error {
 	}
 }
 
-// handleLine decodes one raw request line and handles it.
-func (s *Server) handleLine(line []byte) Response {
+// handleLine decodes one raw request line, handles it and passes the
+// response to send.
+func (s *Server) handleLine(line []byte, send func(Response)) {
 	var req Request
 	if err := json.Unmarshal(line, &req); err != nil {
 		// Broken JSON, or a field of the wrong type. Whatever Unmarshal
 		// managed to fill in is kept, so the id is echoed when it was
 		// readable and is null when it wasn't.
-		return errorResponse(req, CodeBadJSON, "could not decode request: "+err.Error())
+		send(errorResponse(req, CodeBadJSON, "could not decode request: "+err.Error()))
+		return
 	}
-	return s.Handle(req)
+	// A check that can run goes to the background (see Serve). One that
+	// will be refused (no hello yet, no step) goes through Handle like any
+	// other request and is answered in order.
+	if req.Op == OpCheck && s.greeted && s.session != nil {
+		job := s.checkJob(req)
+		s.background.Add(1)
+		go func() {
+			defer s.background.Done()
+			send(job())
+		}()
+		return
+	}
+	send(s.Handle(req))
 }
 
 // Handle answers one decoded request. It is the whole protocol state machine:
 // hello must succeed before anything else, list describes the lessons,
 // start (re)creates the session for a step,
-// update judges a buffer, restart resets the attempt.
+// update judges a buffer, restart resets the attempt, check compiles and
+// tests a buffer. Handle itself runs a check before returning; Serve is what
+// runs checks in the background.
 func (s *Server) Handle(req Request) Response {
 	if req.Op == OpHello {
 		return s.hello(req)
@@ -97,6 +168,7 @@ func (s *Server) Handle(req Request) Response {
 				fmt.Sprintf("no step %q; send list to see the step ids", req.Step))
 		}
 		s.session = judge.NewSession(step)
+		s.prewarm(step)
 		return s.started(req)
 	case OpUpdate:
 		if s.session == nil {
@@ -110,6 +182,11 @@ func (s *Server) Handle(req Request) Response {
 		}
 		s.session.Restart()
 		return s.started(req)
+	case OpCheck:
+		if s.session == nil {
+			return errorResponse(req, CodeNoStep, "no step in progress; send start first")
+		}
+		return s.checkJob(req)()
 	default:
 		return errorResponse(req, CodeUnknownOp, fmt.Sprintf("unknown op %q", req.Op))
 	}
@@ -130,6 +207,34 @@ func (s *Server) hello(req Request) Response {
 	}
 	s.greeted = true
 	return resp
+}
+
+// checkJob reads what a check needs from the server now, on the goroutine
+// handling requests: the step being played and the lines to check. It
+// returns a function that runs the check and builds the response. That
+// function touches no Server state, so it is safe to run on another
+// goroutine while the server goes on to the next request, even if that
+// request starts a different step.
+func (s *Server) checkJob(req Request) func() Response {
+	step, gocache := s.session.Step(), s.gocache
+	source := strings.Join(req.Lines, "\n") + "\n" // a file ends in a newline
+	return func() Response {
+		res := check.Run(context.Background(), step, source, gocache)
+		return Response{ID: req.ID, Op: req.Op, Check: &res}
+	}
+}
+
+// prewarm checks the step's own target in the background and throws the
+// result away. The point is the side effect: the go command compiles the
+// packages the step imports (net/http and the rest) into the build cache, so
+// the learner's first check takes about a second instead of several. It is
+// stopped when the input ends.
+func (s *Server) prewarm(step lesson.Step) {
+	s.background.Add(1)
+	go func() {
+		defer s.background.Done()
+		check.Run(s.warmCtx, step, step.Source(), s.gocache)
+	}()
 }
 
 // started answers start and restart alike: the step's layout plus the render

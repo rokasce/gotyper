@@ -131,7 +131,7 @@ func roundTrip(lib lesson.Library, reqs []protocol.Request) ([]protocol.Response
 		}
 	}
 	var out strings.Builder
-	srv := protocol.NewServer(lib)
+	srv := protocol.NewServer(lib, "")
 	if err := srv.Serve(strings.NewReader(in.String()), &out); err != nil {
 		return nil, err
 	}

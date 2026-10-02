@@ -7,6 +7,7 @@
 package protocol
 
 import (
+	"github.com/rokasce/gotyper/engine/check"
 	"github.com/rokasce/gotyper/engine/judge"
 	"github.com/rokasce/gotyper/engine/lesson"
 )
@@ -28,6 +29,7 @@ const (
 	OpStart   = "start"
 	OpUpdate  = "update"
 	OpRestart = "restart"
+	OpCheck   = "check"
 )
 
 // Error codes, in Error.Code. The front end can branch on the code; the
@@ -58,18 +60,19 @@ type Request struct {
 	// track.
 	Step string `json:"step,omitempty"`
 
-	// Lines, Keys and Cursor describe the buffer (update only): every line
-	// of the buffer, the keystroke count since the attempt began, and the
-	// 0-based {row, byte column} of the cursor.
-	Lines  []string `json:"lines,omitempty"`
-	Keys   int      `json:"keys,omitempty"`
-	Cursor [2]int   `json:"cursor"`
+	// Lines is every line of the buffer (update and check).
+	Lines []string `json:"lines,omitempty"`
+	// Keys and Cursor describe the attempt (update only): the keystroke
+	// count since the attempt began, and the 0-based {row, byte column} of
+	// the cursor.
+	Keys   int    `json:"keys,omitempty"`
+	Cursor [2]int `json:"cursor"`
 }
 
 // Response is one line from the engine. Exactly one of the payload fields
-// (Hello, List, Start, Render) or Error is set, except that a failed hello
-// carries both Hello and Error so the front end can show which engine it
-// found.
+// (Hello, List, Start, Render, Check) or Error is set, except that a failed
+// hello carries both Hello and Error so the front end can show which engine
+// it found, and start and restart carry both Start and Render.
 type Response struct {
 	ID     *int64        `json:"id"`
 	Op     string        `json:"op,omitempty"`
@@ -77,6 +80,7 @@ type Response struct {
 	List   *List         `json:"list,omitempty"`
 	Start  *Start        `json:"start,omitempty"`
 	Render *judge.Render `json:"render,omitempty"`
+	Check  *check.Result `json:"check,omitempty"`
 	Error  *Error        `json:"error,omitempty"`
 }
 
