@@ -31,3 +31,7 @@ end, { desc = "gotyper: show or hide the explanation panel" })
 vim.api.nvim_create_user_command("GotyperSubmit", function()
   require("gotyper").submit()
 end, { desc = "gotyper: submit a recall step (go vet + go test)" })
+
+vim.api.nvim_create_user_command("GotyperStats", function()
+  require("gotyper").show_stats()
+end, { desc = "gotyper: show the best results of every completed step" })

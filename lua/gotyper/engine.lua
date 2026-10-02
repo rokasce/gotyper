@@ -68,31 +68,50 @@ function M.mismatch_message(hello)
     .. "Rebuild the engine by deleting %s/bin and running :Gotyper again."):format(found, hello.error.message, root)
 end
 
--- list asks the engine at `bin` which tracks and steps it offers (the `list`
--- op) and returns its tracks: { { id = ..., steps = { { id, title, mode }, ... } }, ... }.
--- Unlike connect, it runs a short-lived engine and waits for it, because
--- command-line completion must answer before Neovim draws the next key.
--- On failure it returns nil and a message for the learner.
-function M.list(bin)
-  -- The handshake must come first, then list. Closing stdin (vim.system does
-  -- that once the input is written) makes the engine exit after answering.
+-- ask runs a short-lived engine at `bin`, sends it the hello handshake and
+-- then one request {"op": op}, and returns the decoded answer to that request.
+-- Unlike connect, it waits for the engine, because command-line completion
+-- must answer before Neovim draws the next key. On failure it returns nil and
+-- a message for the learner.
+local function ask(bin, op)
+  -- The handshake must come first. Closing stdin (vim.system does that once
+  -- the input is written) makes the engine exit after answering.
   local input = vim.json.encode({ id = 1, op = "hello", protocol = M.PROTOCOL }) .. "\n"
-    .. vim.json.encode({ id = 2, op = "list" }) .. "\n"
+    .. vim.json.encode({ id = 2, op = op }) .. "\n"
   local r = vim.system({ bin }, { stdin = input }):wait()
-  -- Answers come in request order: the first line answers hello, the second list.
+  -- Answers come in request order: the first line answers hello, the second op.
   local lines = vim.split(r.stdout or "", "\n", { trimempty = true })
   local answers = {}
   for i = 1, 2 do
     local ok, resp = pcall(vim.json.decode, lines[i] or "", { luanil = { object = true, array = true } })
     if not ok or type(resp) ~= "table" then
-      return nil, "gotyper: the engine did not list its steps:\n" .. (r.stderr or "")
+      return nil, ("gotyper: the engine did not answer %s:\n%s"):format(op, r.stderr or "")
     end
     answers[i] = resp
   end
-  local hello, list = answers[1], answers[2]
+  local hello, answer = answers[1], answers[2]
   if hello.error then return nil, M.mismatch_message(hello) end
-  if list.error then return nil, "gotyper engine: " .. list.error.message end
-  return list.list.tracks
+  if answer.error then return nil, "gotyper engine: " .. answer.error.message end
+  return answer
+end
+
+-- list asks the engine at `bin` which tracks and steps it offers (the `list`
+-- op) and returns its tracks: { { id = ..., steps = { { id, title, mode }, ... } }, ... }.
+-- On failure it returns nil and a message for the learner.
+function M.list(bin)
+  local answer, err = ask(bin, "list")
+  if not answer then return nil, err end
+  return answer.list.tracks
+end
+
+-- stats asks the engine at `bin` for the bests of every step completed so far
+-- (the `stats` op) and returns them: { { step, mode, best_wpm, best_accuracy,
+-- fewest_keys, completions, last_played }, ... }, sorted by step id. On
+-- failure it returns nil and a message for the learner.
+function M.stats(bin)
+  local answer, err = ask(bin, "stats")
+  if not answer then return nil, err end
+  return answer.stats.steps
 end
 
 -- connect starts the engine binary as a job and returns a client with:

@@ -8,12 +8,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rokasce/gotyper/engine/check"
 	"github.com/rokasce/gotyper/engine/judge"
 	"github.com/rokasce/gotyper/engine/lesson"
+	"github.com/rokasce/gotyper/engine/stats"
 )
 
 // Server holds the engine's state between requests: the lessons it can
@@ -23,6 +27,25 @@ type Server struct {
 	lib     lesson.Library
 	greeted bool
 	session *judge.Session // nil until the first start
+	// last is the latest render sent for the session, so a check knows
+	// whether a type-along attempt was done and with which stats.
+	last judge.Render
+	// statsPath is the stats file that completed steps are added to.
+	statsPath string
+
+	// mu guards attempt, lines and recorded, which a check's goroutine
+	// reads when it finishes to decide whether to record the attempt it
+	// checked.
+	mu sync.Mutex
+	// attempt counts start and restart requests, so each attempt has its
+	// own number.
+	attempt int
+	// lines is the buffer from the latest update in this attempt.
+	lines []string
+	// recorded is whether this attempt is already in the stats file, so
+	// checking it again (another F6, or retyping the last character of a
+	// type-along step) does not count it twice.
+	recorded bool
 
 	// background counts the goroutines running checks, so Serve can wait
 	// for them before it returns.
@@ -32,12 +55,13 @@ type Server struct {
 	ctx context.Context
 }
 
-// NewServer returns a server that offers the steps in lib. Cancelling ctx
-// stops the server: running checks are killed (their temporary directories
-// are still removed) and Serve returns. The engine cancels it when it is
-// told to stop with SIGTERM or an interrupt.
-func NewServer(ctx context.Context, lib lesson.Library) *Server {
-	return &Server{lib: lib, ctx: ctx}
+// NewServer returns a server that offers the steps in lib and adds every
+// completed step to the stats file at statsPath (see package stats).
+// Cancelling ctx stops the server: running checks are killed (their
+// temporary directories are still removed) and Serve returns. The engine
+// cancels it when it is told to stop with SIGTERM or an interrupt.
+func NewServer(ctx context.Context, lib lesson.Library, statsPath string) *Server {
+	return &Server{lib: lib, ctx: ctx, statsPath: statsPath}
 }
 
 // readResult is one ReadBytes call's result, passed from Serve's reading
@@ -173,8 +197,9 @@ func (s *Server) handleLine(line []byte, send func(Response)) {
 // hello must succeed before anything else, list describes the lessons,
 // start (re)creates the session for a step,
 // update judges a buffer, restart resets the attempt, check compiles and
-// tests a buffer. Handle itself runs a check before returning; Serve is what
-// runs checks in the background.
+// tests a buffer, stats reports the bests from the stats file. Handle itself
+// runs a check before returning; Serve is what runs checks in the
+// background.
 func (s *Server) Handle(req Request) Response {
 	if req.Op == OpHello {
 		return s.hello(req)
@@ -204,7 +229,11 @@ func (s *Server) Handle(req Request) Response {
 		if s.session == nil {
 			return errorResponse(req, CodeNoStep, "no step in progress; send start first")
 		}
-		render := s.session.Update(req.Lines, req.Keys, req.Cursor)
+		s.last = s.session.Update(req.Lines, req.Keys, req.Cursor)
+		s.mu.Lock()
+		s.lines = req.Lines
+		s.mu.Unlock()
+		render := s.last // a copy, so the response keeps it after the next update
 		return Response{ID: req.ID, Op: req.Op, Render: &render}
 	case OpRestart:
 		if s.session == nil {
@@ -217,6 +246,12 @@ func (s *Server) Handle(req Request) Response {
 			return errorResponse(req, CodeNoStep, "no step in progress; send start first")
 		}
 		return s.checkJob(req)()
+	case OpStats:
+		records, err := stats.Load(s.statsPath)
+		if err != nil {
+			return errorResponse(req, CodeStatsUnreadable, "reading the stats file: "+err.Error())
+		}
+		return Response{ID: req.ID, Op: req.Op, Stats: &Stats{Steps: stats.Bests(records)}}
 	default:
 		return errorResponse(req, CodeUnknownOp, fmt.Sprintf("unknown op %q", req.Op))
 	}
@@ -240,25 +275,71 @@ func (s *Server) hello(req Request) Response {
 }
 
 // checkJob reads what a check needs from the server now, on the goroutine
-// handling requests: the step being played and the lines to check. It
-// returns a function that runs the check and builds the response. That
-// function touches no Server state, so it is safe to run on another
-// goroutine while the server goes on to the next request, even if that
-// request starts a different step.
+// handling requests: the step being played, the lines to check, the attempt
+// and its latest stats. It returns a function that runs the check, records
+// the step in the stats file if the check completed it, and builds the
+// response. Apart from claiming the record under mu, that function
+// touches no Server state, so it is safe to run on another goroutine while
+// the server goes on to the next request, even if that request starts a
+// different step.
+//
+// A passing check completes a recall step. A type-along step is complete
+// when its text matches (the latest render is done), and the passing check
+// is what it is recorded with. Either way the attempt must still be going
+// when the check finishes, with the buffer still holding the checked lines:
+// after a start or restart the attempt was given up, and after an edit the
+// learner is no longer at the code that passed (the front end then asks
+// them to submit again, see PROTOCOL.md). An attempt is recorded at most
+// once, however many of its checks pass.
 func (s *Server) checkJob(req Request) func() Response {
-	ctx, step := s.ctx, s.session.Step()
+	ctx, step, stat := s.ctx, s.session.Step(), s.last.Stats
+	complete := step.Mode == lesson.Recall || s.last.Done
+	attempt := s.attempt                           // only this goroutine writes it, so no lock is needed to read it
 	source := strings.Join(req.Lines, "\n") + "\n" // a file ends in a newline
 	return func() Response {
 		res := check.Run(ctx, step, source)
+		if res.OK && complete && s.claimRecord(attempt, req.Lines) {
+			rec := stats.Record{
+				Step: step.ID, Mode: step.Mode,
+				WPM: stat.WPM, Accuracy: stat.Accuracy, Keys: stat.Keys, Errors: stat.Errors, Seconds: stat.Seconds,
+				Check: "pass", CheckMS: res.MS, Time: time.Now(),
+			}
+			// Losing a record should not cost the learner the check's
+			// answer, so the error only goes to stderr, which the plugin
+			// shows as a warning.
+			if err := stats.Append(s.statsPath, rec); err != nil {
+				fmt.Fprintln(os.Stderr, "gotyper-engine: recording stats:", err)
+			}
+		}
 		return Response{ID: req.ID, Op: req.Op, Check: &res}
 	}
+}
+
+// claimRecord reports whether a check of attempt with lines should be
+// recorded: attempt is still the current attempt, the latest update's
+// buffer is lines, and the attempt is not recorded yet. If so it marks the
+// attempt recorded. It may be called from any goroutine.
+func (s *Server) claimRecord(attempt int, lines []string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.attempt != attempt || !slices.Equal(s.lines, lines) || s.recorded {
+		return false
+	}
+	s.recorded = true
+	return true
 }
 
 // started answers start and restart alike: the step's layout plus the render
 // of an empty buffer, so the front end can paint the fresh attempt straight
 // away without a separate update.
 func (s *Server) started(req Request) Response {
-	render := s.session.Update([]string{""}, 0, [2]int{})
+	s.mu.Lock()
+	s.attempt++ // a check of the previous attempt no longer completes it
+	s.lines = []string{""}
+	s.recorded = false
+	s.mu.Unlock()
+	s.last = s.session.Update(s.lines, 0, [2]int{})
+	render := s.last
 	return Response{ID: req.ID, Op: req.Op, Start: startInfo(s.session), Render: &render}
 }
 

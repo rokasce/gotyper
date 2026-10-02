@@ -10,6 +10,7 @@ import (
 	"github.com/rokasce/gotyper/engine/check"
 	"github.com/rokasce/gotyper/engine/judge"
 	"github.com/rokasce/gotyper/engine/lesson"
+	"github.com/rokasce/gotyper/engine/stats"
 )
 
 // Version is the protocol version this engine speaks. The front end sends the
@@ -30,6 +31,7 @@ const (
 	OpUpdate  = "update"
 	OpRestart = "restart"
 	OpCheck   = "check"
+	OpStats   = "stats"
 )
 
 // Error codes, in Error.Code. The front end can branch on the code; the
@@ -41,6 +43,7 @@ const (
 	CodeHandshakeRequired = "handshake_required"
 	CodeNoStep            = "no_step"
 	CodeUnknownStep       = "unknown_step"
+	CodeStatsUnreadable   = "stats_unreadable"
 )
 
 // Request is one line from the front end. Which fields matter depends on Op;
@@ -70,7 +73,7 @@ type Request struct {
 }
 
 // Response is one line from the engine. Exactly one of the payload fields
-// (Hello, List, Start, Render, Check) or Error is set, except that a failed
+// (Hello, List, Start, Render, Check, Stats) or Error is set, except that a failed
 // hello carries both Hello and Error so the front end can show which engine
 // it found, and start and restart carry both Start and Render.
 type Response struct {
@@ -81,6 +84,7 @@ type Response struct {
 	Start  *Start        `json:"start,omitempty"`
 	Render *judge.Render `json:"render,omitempty"`
 	Check  *check.Result `json:"check,omitempty"`
+	Stats  *Stats        `json:"stats,omitempty"`
 	Error  *Error        `json:"error,omitempty"`
 }
 
@@ -126,6 +130,12 @@ type Start struct {
 	Lines int `json:"lines"`
 	// Width is the display width of the widest target line, tabs expanded.
 	Width int `json:"width"`
+}
+
+// Stats is the answer to stats: the bests of every step completed so far,
+// read from the stats file (package stats), sorted by step id.
+type Stats struct {
+	Steps []stats.Best `json:"steps"`
 }
 
 // Error explains why a request failed. The engine keeps running after

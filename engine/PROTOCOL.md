@@ -18,7 +18,7 @@ The Go form of this schema is `engine/protocol/protocol.go`.
 | Field | In | Type | Meaning |
 |---|---|---|---|
 | `id` | request, response | integer or `null` | Chosen by the front end and echoed on the response. It is `null` on the response when the request line could not be decoded far enough to read its id. |
-| `op` | request, response | string | `hello`, `list`, `start`, `update`, `restart` or `check`. The response echoes it. |
+| `op` | request, response | string | `hello`, `list`, `start`, `update`, `restart`, `check` or `stats`. The response echoes it. |
 | `error` | response | object | Present only when the request failed: `{"code": string, "message": string}`. The engine keeps running after any error. |
 
 Error codes:
@@ -30,6 +30,7 @@ Error codes:
 | `handshake_required` | Any op other than `hello` before a successful `hello`. |
 | `no_step` | `update`, `restart` or `check` before any `start`. |
 | `unknown_step` | `start` named a step id that `list` does not report, or the engine has no lessons. |
+| `stats_unreadable` | `stats` could not read the stats file (a missing file is not an error). |
 | `unknown_op` | `op` is not one listed here. |
 
 ## `hello`: the handshake (must come first)
@@ -195,6 +196,62 @@ In a recall step a passing check is what completes the step; the front end
 decides that from `ok`, and only if the buffer still holds the `lines` it
 sent.
 
+### Recording a completed step
+
+When a check completes a step, the engine adds one line to its stats file
+(see `stats` below) before it answers. A check completes a step when it
+passes and:
+
+- in a type-along step, the latest `update` answer was `done`;
+- in a recall step, always;
+- and in both, the attempt is still going when the check finishes: no
+  `start` or `restart` came in meanwhile, and the latest `update` sent the
+  same `lines` as the check. A pass for code the learner has edited since,
+  or for an attempt they threw away, is not recorded;
+- and the attempt is not recorded yet. An attempt is recorded at most once,
+  however many of its checks pass; the next `start` or `restart` begins a
+  new attempt that can be recorded again.
+
+Restarted or abandoned attempts therefore leave nothing in the file. Each
+line is one JSON object:
+
+```json
+{"step":"json-api/01-greet-handler","mode":"type-along","wpm":52.3,"accuracy":98.6,"keys":712,"errors":4,"seconds":121.4,"check":"pass","check_ms":1048,"time":"2026-10-01T10:15:02.5+03:00"}
+```
+
+| Field | Meaning |
+|---|---|
+| `step`, `mode` | The step's id and mode. |
+| `wpm`, `accuracy`, `keys`, `errors`, `seconds` | The attempt's `stats` from the latest `update` answer. In a recall step `wpm` and `accuracy` are 0. |
+| `check`, `check_ms` | The check that completed the step: always `"pass"`, and how long it took. |
+| `time` | When the step was completed, RFC 3339. |
+
+If the line cannot be written, the engine says so on stderr and still
+answers the check.
+
+## `stats`: the bests of every completed step
+
+```json
+{"id":7,"op":"stats"}
+{"id":7,"op":"stats","stats":{"steps":[
+  {"step":"json-api/01-greet-handler","mode":"type-along","best_wpm":52.3,"best_accuracy":100,"fewest_keys":690,"completions":3,"last_played":"2026-10-01T10:15:02.5+03:00"}]}}
+```
+
+`stats` needs no `start`. The engine reads its stats file,
+`gotyper/stats.jsonl` under `$XDG_DATA_HOME`, or under `~/.local/share` when
+that is not set (the directory that also holds Neovim's own data), and sums
+it up per step. Steps never completed are not listed; with no file yet,
+`steps` is `[]`. A line that is not a valid record, such as one cut short by
+a crash, is skipped.
+
+| `steps[]` field | Meaning |
+|---|---|
+| `step`, `mode` | The step's id, and its mode in the latest record. Steps are sorted by id. |
+| `best_wpm`, `best_accuracy` | The highest of the step's records. They need not come from the same attempt. 0 for a recall step. |
+| `fewest_keys` | The fewest keystrokes of the step's records. |
+| `completions` | How many times the step was completed. |
+| `last_played` | The `time` of the latest record. |
+
 ## Ordering
 
 The engine reads requests one at a time and answers every op except
@@ -216,7 +273,7 @@ exits.
 
 `list`, `unknown_step`, the `step` request field and the `step` and `mode`
 fields of `start` were added within version 1. So were the `check` op and the
-`recall` mode. They don't change any existing field's meaning: a `start`
+`recall` mode, and the `stats` op. They don't change any existing field's meaning: a `start`
 without `step` behaves as before, a type-along step is judged as before, and
 a front end that doesn't know `recall` can skip those steps, so the version
 stayed at 1.

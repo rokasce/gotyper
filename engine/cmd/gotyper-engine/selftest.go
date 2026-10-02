@@ -22,7 +22,10 @@ import (
 //
 // The typo attempt assumes the step's first line starts with "pack", as
 // every Go file's "package" line does.
-func selftest(w io.Writer, lib lesson.Library) error {
+//
+// statsPath is the stats file the server is given. The selftest sends no
+// check, so it completes no step and adds nothing to the file.
+func selftest(w io.Writer, lib lesson.Library, statsPath string) error {
 	step, ok := lib.First()
 	if !ok {
 		return fmt.Errorf("no lessons to play")
@@ -63,7 +66,7 @@ func selftest(w io.Writer, lib lesson.Library) error {
 	typeStep()
 	typoEnd := len(reqs) - 1
 
-	resps, err := roundTrip(lib, reqs)
+	resps, err := roundTrip(lib, statsPath, reqs)
 	if err != nil {
 		return err
 	}
@@ -121,9 +124,9 @@ func countSteps(lib lesson.Library) int {
 	return n
 }
 
-// roundTrip encodes reqs as NDJSON, serves them from lib, and decodes the
-// answers.
-func roundTrip(lib lesson.Library, reqs []protocol.Request) ([]protocol.Response, error) {
+// roundTrip encodes reqs as NDJSON, serves them from lib with the stats file
+// statsPath, and decodes the answers.
+func roundTrip(lib lesson.Library, statsPath string, reqs []protocol.Request) ([]protocol.Response, error) {
 	var in strings.Builder
 	enc := json.NewEncoder(&in)
 	for _, r := range reqs {
@@ -132,7 +135,7 @@ func roundTrip(lib lesson.Library, reqs []protocol.Request) ([]protocol.Response
 		}
 	}
 	var out strings.Builder
-	srv := protocol.NewServer(context.Background(), lib)
+	srv := protocol.NewServer(context.Background(), lib, statsPath)
 	if err := srv.Serve(strings.NewReader(in.String()), &out); err != nil {
 		return nil, err
 	}
