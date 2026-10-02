@@ -12,18 +12,18 @@ import (
 	"github.com/rokasce/gotyper/engine/lesson"
 )
 
-// Server holds the engine's state between requests: whether the handshake
-// has happened and the session for the step being played. One Server serves
-// one front end.
+// Server holds the engine's state between requests: the lessons it can
+// serve, whether the handshake has happened and the session for the step
+// being played. One Server serves one front end.
 type Server struct {
-	step    lesson.Step
+	lib     lesson.Library
 	greeted bool
 	session *judge.Session // nil until the first start
 }
 
-// NewServer returns a server that will serve step when asked to start.
-func NewServer(step lesson.Step) *Server {
-	return &Server{step: step}
+// NewServer returns a server that offers the steps in lib.
+func NewServer(lib lesson.Library) *Server {
+	return &Server{lib: lib}
 }
 
 // Serve reads requests from r and writes responses to w until r reaches end
@@ -70,7 +70,8 @@ func (s *Server) handleLine(line []byte) Response {
 }
 
 // Handle answers one decoded request. It is the whole protocol state machine:
-// hello must succeed before anything else, start (re)creates the session,
+// hello must succeed before anything else, list describes the lessons,
+// start (re)creates the session for a step,
 // update judges a buffer, restart resets the attempt.
 func (s *Server) Handle(req Request) Response {
 	if req.Op == OpHello {
@@ -81,8 +82,21 @@ func (s *Server) Handle(req Request) Response {
 			fmt.Sprintf(`send {"op":"hello","protocol":%d} first`, Version))
 	}
 	switch req.Op {
+	case OpList:
+		return Response{ID: req.ID, Op: req.Op, List: listInfo(s.lib)}
 	case OpStart:
-		s.session = judge.NewSession(s.step)
+		step, ok := s.lib.First()
+		if req.Step != "" {
+			step, ok = s.lib.Step(req.Step)
+		}
+		if !ok && req.Step == "" {
+			return errorResponse(req, CodeUnknownStep, "the engine has no lessons loaded")
+		}
+		if !ok {
+			return errorResponse(req, CodeUnknownStep,
+				fmt.Sprintf("no step %q; send list to see the step ids", req.Step))
+		}
+		s.session = judge.NewSession(step)
 		return s.started(req)
 	case OpUpdate:
 		if s.session == nil {
@@ -129,12 +143,27 @@ func (s *Server) started(req Request) Response {
 func startInfo(sess *judge.Session) *Start {
 	step := sess.Step()
 	return &Start{
+		Step:    step.ID,
+		Mode:    step.Mode,
 		Title:   step.Title,
 		Intro:   step.Intro,
 		Indents: sess.Indents(),
 		Lines:   len(step.Target),
 		Width:   sess.Width(),
 	}
+}
+
+// listInfo summarises the library for the list op.
+func listInfo(lib lesson.Library) *List {
+	list := &List{Tracks: []TrackInfo{}} // [] rather than null when empty
+	for _, t := range lib.Tracks {
+		info := TrackInfo{ID: t.ID, Steps: []StepInfo{}}
+		for _, st := range t.Steps {
+			info.Steps = append(info.Steps, StepInfo{ID: st.ID, Title: st.Title, Mode: st.Mode})
+		}
+		list.Tracks = append(list.Tracks, info)
+	}
+	return list
 }
 
 func errorResponse(req Request, code, msg string) Response {

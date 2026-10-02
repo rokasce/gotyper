@@ -17,7 +17,7 @@ The Go form of this schema is `engine/protocol/protocol.go`.
 | Field | In | Type | Meaning |
 |---|---|---|---|
 | `id` | request, response | integer or `null` | Chosen by the front end and echoed on the response. It is `null` on the response when the request line could not be decoded far enough to read its id. |
-| `op` | request, response | string | `hello`, `start`, `update` or `restart`. The response echoes it. |
+| `op` | request, response | string | `hello`, `list`, `start`, `update` or `restart`. The response echoes it. |
 | `error` | response | object | Present only when the request failed: `{"code": string, "message": string}`. The engine keeps running after any error. |
 
 Error codes:
@@ -28,6 +28,7 @@ Error codes:
 | `version_mismatch` | `hello` named a protocol version other than 1. |
 | `handshake_required` | Any op other than `hello` before a successful `hello`. |
 | `no_step` | `update` or `restart` before any `start`. |
+| `unknown_step` | `start` named a step id that `list` does not report, or the engine has no lessons. |
 | `unknown_op` | `op` is not one listed here. |
 
 ## `hello`: the handshake (must come first)
@@ -47,25 +48,44 @@ found) plus an error, and the engine stays un-greeted:
 
 A later `hello` with the right version still succeeds.
 
-## `start`: begin the step
+## `list`: the tracks and steps on offer
 
 ```json
-{"id":2,"op":"start"}
+{"id":2,"op":"list"}
+{"id":2,"op":"list","list":{"tracks":[
+  {"id":"json-api","steps":[
+    {"id":"json-api/01-greet-handler","title":"Step 1 - a JSON handler with errors as values","mode":"type-along"}]}]}}
 ```
 
+Tracks and their steps come in play order. A step `id` is
+`<track>/<step directory>`; pass it to `start`. `mode` says how the step is
+played. The only mode today is `type-along`; front ends should be ready for
+others (`recall` is planned) and may skip steps whose mode they don't know.
+
+## `start`: begin a step
+
+```json
+{"id":3,"op":"start","step":"json-api/01-greet-handler"}
+```
+
+`step` is a step id from `list`. Without `step`, the engine begins the first
+step of the first track. An id that isn't listed gets `unknown_step`, and the
+step already in progress (if any) carries on untouched.
+
 The response carries `start` (the step's layout) and `render` (what to paint
-for an empty buffer, see `update`). A second `start` begins the step again from
+for an empty buffer, see `update`). A second `start` begins a step again from
 scratch.
 
 ```json
-{"id":2,"op":"start",
- "start":{"title":"Step 1 - ...","intro":["Type the ghost text. ..."],"indents":[0,0,0,4,...],"lines":28,"width":59},
+{"id":3,"op":"start",
+ "start":{"step":"json-api/01-greet-handler","mode":"type-along","title":"Step 1 - ...","intro":["Type the ghost text. ..."],"indents":[0,0,0,4,...],"lines":28,"width":59},
  "render":{...}}
 ```
 
 | `start` field | Meaning |
 |---|---|
-| `title`, `intro` | Text to show beside the code. `intro` is a list of lines. |
+| `step`, `mode` | The id and mode of the step that began, which tells the front end what a `start` without `step` picked. |
+| `title`, `intro` | Text to show beside the code. `intro` is a list of markdown lines. |
 | `indents` | For each target line, its indentation in display columns (tab = 4). The front end inserts this on Enter, so the learner never types indentation. |
 | `lines` | Number of target lines. |
 | `width` | Display width of the widest target line, tabs expanded. |
@@ -75,7 +95,7 @@ scratch.
 Send this on every buffer change.
 
 ```json
-{"id":3,"op":"update","lines":["packx"],"keys":5,"cursor":[0,5]}
+{"id":4,"op":"update","lines":["packx"],"keys":5,"cursor":[0,5]}
 ```
 
 | Request field | Meaning |
@@ -87,7 +107,7 @@ Send this on every buffer change.
 The response carries `render`:
 
 ```json
-{"id":3,"op":"update","render":{
+{"id":4,"op":"update","render":{
   "error_spans":[{"row":0,"col":4,"end_col":5}],
   "ghosts":[{"row":0,"col":5,"text":"ge main"}],
   "ghost_lines":["","import (","    \"encoding/json\"", "..."],
@@ -118,7 +138,7 @@ target are errors unless they are blank.
 ## `restart`: try the step again
 
 ```json
-{"id":4,"op":"restart"}
+{"id":5,"op":"restart"}
 ```
 
 `restart` throws away the current attempt and starts a fresh one at the same
@@ -128,6 +148,11 @@ running. The response has the same shape as `start`'s, so the front end can
 clear its buffer, reset its key count, and paint the returned `render`.
 
 ## Compatibility
+
+`list`, `unknown_step`, the `step` request field and the `step` and `mode`
+fields of `start` were added within version 1. They don't change any
+existing field's meaning, and a `start` without `step` behaves as before, so
+the version stayed at 1.
 
 New optional fields may appear in responses within version 1, and front ends
 should ignore fields they don't know. Changing or removing a field's meaning

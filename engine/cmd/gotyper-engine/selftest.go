@@ -12,13 +12,20 @@ import (
 	"github.com/rokasce/gotyper/engine/protocol"
 )
 
-// selftest plays the built-in step through the real protocol code, in
+// selftest plays the first step of lib through the real protocol code, in
 // process: it writes NDJSON requests into Serve and reads the NDJSON answers
-// back, exactly as the plugin would over a pipe. It plays two attempts:
-// a perfect one, then (after a restart) one with a typo that gets fixed.
-// It writes a short summary to w and returns an error if anything is off.
-func selftest(w io.Writer) error {
-	step := lesson.Fixture()
+// back, exactly as the plugin would over a pipe. It lists the steps, starts
+// the first one by its ID, and plays two attempts: a perfect one, then
+// (after a restart) one with a typo that gets fixed. It writes a short
+// summary to w and returns an error if anything is off.
+//
+// The typo attempt assumes the step's first line starts with "pack", as
+// every Go file's "package" line does.
+func selftest(w io.Writer, lib lesson.Library) error {
+	step, ok := lib.First()
+	if !ok {
+		return fmt.Errorf("no lessons to play")
+	}
 	var reqs []protocol.Request
 	nextID := int64(0)
 	add := func(req protocol.Request) {
@@ -39,7 +46,8 @@ func selftest(w io.Writer) error {
 	}
 
 	add(protocol.Request{Op: protocol.OpHello, Protocol: protocol.Version})
-	add(protocol.Request{Op: protocol.OpStart})
+	add(protocol.Request{Op: protocol.OpList})
+	add(protocol.Request{Op: protocol.OpStart, Step: step.ID})
 	typeStep()
 	perfectEnd := len(reqs) - 1
 
@@ -54,7 +62,7 @@ func selftest(w io.Writer) error {
 	typeStep()
 	typoEnd := len(reqs) - 1
 
-	resps, err := roundTrip(reqs)
+	resps, err := roundTrip(lib, reqs)
 	if err != nil {
 		return err
 	}
@@ -68,6 +76,8 @@ func selftest(w io.Writer) error {
 	}
 
 	hello := resps[0].Hello
+	list := resps[1].List
+	started := resps[2].Start
 	perfect := resps[perfectEnd].Render
 	restart := resps[restartAt].Render
 	typo := resps[typoAt].Render
@@ -78,6 +88,8 @@ func selftest(w io.Writer) error {
 		what string
 	}{
 		{hello != nil && hello.Protocol == protocol.Version, "handshake reports our protocol version"},
+		{list != nil && len(list.Tracks) == len(lib.Tracks) && list.Tracks[0].Steps[0].ID == step.ID, "list reports the loaded steps"},
+		{started != nil && started.Step == step.ID && started.Lines == len(step.Target), "start by id begins that step"},
 		{perfect.Done && perfect.Stats.Errors == 0 && perfect.Stats.Accuracy == 100, "perfect run is done with no errors"},
 		{restart.Stats.Errors == 0 && !restart.Done && len(restart.GhostLines) == len(step.Target)-1, "restart starts a fresh attempt"},
 		{len(typo.ErrorSpans) == 1 && typo.ErrorSpans[0] == (judge.Span{Row: 0, Col: 4, EndCol: 5}), "typo is highlighted"},
@@ -90,6 +102,7 @@ func selftest(w io.Writer) error {
 	}
 
 	fmt.Fprintf(w, "gotyper-engine %s selftest (protocol %d): ok\n", protocol.EngineVersion, protocol.Version)
+	fmt.Fprintf(w, "  lessons:     %d track(s), %d step(s); played %s\n", len(lib.Tracks), countSteps(lib), step.ID)
 	fmt.Fprintf(w, "  perfect run: %d/%d lines, %d errors, accuracy %.1f%%\n",
 		perfect.Stats.Line, perfect.Stats.Lines, perfect.Stats.Errors, perfect.Stats.Accuracy)
 	fmt.Fprintf(w, "  restart:     errors back to %d\n", restart.Stats.Errors)
@@ -98,8 +111,18 @@ func selftest(w io.Writer) error {
 	return nil
 }
 
-// roundTrip encodes reqs as NDJSON, serves them, and decodes the answers.
-func roundTrip(reqs []protocol.Request) ([]protocol.Response, error) {
+// countSteps returns the number of steps in every track of lib.
+func countSteps(lib lesson.Library) int {
+	n := 0
+	for _, t := range lib.Tracks {
+		n += len(t.Steps)
+	}
+	return n
+}
+
+// roundTrip encodes reqs as NDJSON, serves them from lib, and decodes the
+// answers.
+func roundTrip(lib lesson.Library, reqs []protocol.Request) ([]protocol.Response, error) {
 	var in strings.Builder
 	enc := json.NewEncoder(&in)
 	for _, r := range reqs {
@@ -108,7 +131,7 @@ func roundTrip(reqs []protocol.Request) ([]protocol.Response, error) {
 		}
 	}
 	var out strings.Builder
-	srv := protocol.NewServer(lesson.Fixture())
+	srv := protocol.NewServer(lib)
 	if err := srv.Serve(strings.NewReader(in.String()), &out); err != nil {
 		return nil, err
 	}

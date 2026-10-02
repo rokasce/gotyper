@@ -3,18 +3,35 @@ package protocol
 import (
 	"bufio"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/rokasce/gotyper/engine/lesson"
 )
 
+// lessons is the repository's lessons directory, loaded once. The tests
+// play its first step, json-api/01-greet-handler (28 lines of handler.go).
+var lessons = func() lesson.Library {
+	root, err := lesson.FindRoot(".")
+	if err != nil {
+		panic(err)
+	}
+	lib, err := lesson.Load(os.DirFS(root))
+	if err != nil {
+		panic(err)
+	}
+	return lib
+}()
+
+const firstStep = "json-api/01-greet-handler"
+
 // serve feeds input to a fresh server and returns the decoded responses, one
 // per output line.
 func serve(t *testing.T, input string) []Response {
 	t.Helper()
 	var out strings.Builder
-	if err := NewServer(lesson.Fixture()).Serve(strings.NewReader(input), &out); err != nil {
+	if err := NewServer(lessons).Serve(strings.NewReader(input), &out); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	var resps []Response
@@ -166,5 +183,50 @@ func TestRestartResetsTheAttempt(t *testing.T) {
 func TestBlankLinesAreIgnored(t *testing.T) {
 	if resps := serve(t, "\n  \n"+hello+"\n"); len(resps) != 1 {
 		t.Fatalf("got %d responses, want 1", len(resps))
+	}
+}
+
+func TestListAndStartByID(t *testing.T) {
+	resps := serve(t, hello+
+		`{"id":2,"op":"list"}`+"\n"+
+		`{"id":3,"op":"start","step":"`+firstStep+`"}`+"\n"+
+		`{"id":4,"op":"start","step":"json-api/99-nope"}`+"\n"+
+		`{"id":5,"op":"update","lines":["p"],"keys":1,"cursor":[0,1]}`+"\n")
+	list := resps[1].List
+	if resps[1].Error != nil || list == nil || len(list.Tracks) == 0 || list.Tracks[0].ID != "json-api" {
+		t.Fatalf("list = %+v (error %+v)", list, resps[1].Error)
+	}
+	got := list.Tracks[0].Steps[0]
+	if got.ID != firstStep || got.Title == "" || got.Mode != lesson.TypeAlong {
+		t.Fatalf("first listed step = %+v", got)
+	}
+	if st := resps[2].Start; resps[2].Error != nil || st == nil || st.Step != firstStep || st.Mode != lesson.TypeAlong {
+		t.Fatalf("start by id = %+v (error %+v)", st, resps[2].Error)
+	}
+	if e := resps[3].Error; e == nil || e.Code != CodeUnknownStep || !strings.Contains(e.Message, "99-nope") {
+		t.Fatalf("unknown step = %+v", resps[3])
+	}
+	// A failed start leaves the step that was already in progress alone.
+	if r := resps[4]; r.Error != nil || r.Render == nil {
+		t.Fatalf("update after failed start = %+v", r)
+	}
+}
+
+func TestStartWithoutIDPicksTheFirstStep(t *testing.T) {
+	resps := serve(t, hello+`{"id":2,"op":"start"}`+"\n")
+	if st := resps[1].Start; st == nil || st.Step != firstStep {
+		t.Fatalf("start = %+v", resps[1])
+	}
+}
+
+func TestStartWithNoLessons(t *testing.T) {
+	var out strings.Builder
+	in := hello + `{"id":2,"op":"start"}` + "\n" + `{"id":3,"op":"list"}` + "\n"
+	if err := NewServer(lesson.Library{}).Serve(strings.NewReader(in), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if !strings.Contains(lines[1], CodeUnknownStep) || !strings.Contains(lines[2], `"tracks":[]`) {
+		t.Fatalf("responses = %q", lines)
 	}
 }

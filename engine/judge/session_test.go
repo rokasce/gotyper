@@ -2,6 +2,7 @@ package judge
 
 import (
 	"math"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -9,7 +10,23 @@ import (
 	"github.com/rokasce/gotyper/engine/lesson"
 )
 
-var demoStep = lesson.Fixture()
+// demoStep is the first step of the repository's lessons: 28 lines of
+// handler.go, starting with "package main".
+var demoStep = func() lesson.Step {
+	root, err := lesson.FindRoot(".")
+	if err != nil {
+		panic(err)
+	}
+	lib, err := lesson.Load(os.DirFS(root))
+	if err != nil {
+		panic(err)
+	}
+	step, ok := lib.Step("json-api/01-greet-handler")
+	if !ok {
+		panic("json-api/01-greet-handler is missing")
+	}
+	return step
+}()
 
 func TestPerfectStepIsDone(t *testing.T) {
 	s := NewSession(demoStep)
