@@ -291,13 +291,16 @@ one request, not one per line. Each update gets a new `id`. An answer whose `id`
 is older than the newest update sent is dropped, because a newer buffer state is
 already on its way.
 
-The winbar is repainted after every painted answer and on every `ModeChanged`
-in the game buffer, an autocmd local to that buffer. It starts with vim's
-current mode as a short label (`ui.mode_label`: INSERT, NORMAL, VISUAL,
-V-LINE, ...; operator-pending reads NORMAL), so a learner who leaves insert
-mode to jump with motions can see which mode their next key lands in. Every
-step's winbar shows the keys against the step's par, such as
-`KEYS 612/580 par`.
+The winbar is repainted after every painted answer, after every counted key
+and on every `ModeChanged` in the game buffer, an autocmd local to that
+buffer. It starts with vim's current mode as a short label (`ui.mode_label`:
+INSERT, NORMAL, VISUAL, V-LINE, ...; operator-pending reads NORMAL), so a
+learner who leaves insert mode to jump with motions can see which mode their
+next key lands in. Every step's winbar shows the keys against the step's par,
+such as `KEYS 612/580 par`. While the step runs, the count is the plugin's
+own, so it goes up with a key that edits nothing (`<Esc>`, `v`, a motion)
+and sends no update; once the step is done it is the engine's final count,
+the one the result panel and the stats show.
 
 What happens when the learner presses the restart key (`<F5>`):
 
