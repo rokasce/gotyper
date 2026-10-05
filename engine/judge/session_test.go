@@ -237,6 +237,25 @@ func TestDrillDeletedLine(t *testing.T) {
 	}
 }
 
+// TestDrillBlankRows: blank and whitespace-only rows are ignored on both
+// sides, so an extra blank row, or a blank row moved elsewhere, marks
+// nothing and still completes the drill.
+func TestDrillBlankRows(t *testing.T) {
+	s := NewSession(drillStep)
+	r := s.Update(goalWith(1, "\ttotal := 0", "\t"), 1, [2]int{})
+	if len(r.ErrorSpans) != 0 || !r.Done {
+		t.Fatalf("extra blank row: spans=%+v done=%v", r.ErrorSpans, r.Done)
+	}
+
+	step := drillStep
+	step.Target = goalWith(4, "\t}", "")
+	s = NewSession(step)
+	moved := goalWith(1, "", "\ttotal := 0")
+	if r = s.Update(moved, 1, [2]int{}); len(r.ErrorSpans) != 0 || !r.Done {
+		t.Fatalf("moved blank row: spans=%+v done=%v", r.ErrorSpans, r.Done)
+	}
+}
+
 // TestDrillEditedLine: on a changed line only the differing run is marked,
 // and text that is only missing marks the rune where it is missing.
 func TestDrillEditedLine(t *testing.T) {

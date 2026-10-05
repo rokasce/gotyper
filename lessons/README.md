@@ -59,7 +59,8 @@ The three modes:
   there is no ghost text to follow.
 - **`drill`**: a vim refactor drill. The buffer opens holding the `start`
   file, the target (the goal) is shown below it, and the learner edits the
-  buffer with vim commands until it equals the goal (indentation aside).
+  buffer with vim commands until it equals the goal (indentation and blank
+  lines aside: only the rows with code must match the goal's, in order).
   The score is the keystrokes against `par`. Set `par` by counting a
   reasonable way to do it, and show that way in the intro as a hint.
 

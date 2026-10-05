@@ -141,7 +141,7 @@ The response carries `render`:
 | `stats.errors` | Mistakes charged in this attempt. This never decreases when a mistake is fixed. A mistake is charged only when it is new and ends exactly at `cursor`, so text shifted by a mid-line edit is shown red but not charged. |
 | `stats.line`, `stats.lines` | How many leading rows fully match, out of the total. |
 | `stats.seconds` | Time since the first typed character. It stops when the attempt is done. |
-| `done` | The attempt has met the step's completion condition. For a type-along step that means every row matches its target with indentation ignored. For a drill it means the buffer has exactly the goal's rows, in order, with indentation ignored. For a recall step it is always `false`; see below. |
+| `done` | The attempt has met the step's completion condition. For a type-along step that means every row matches its target with indentation ignored. For a drill it means the buffer's rows with code are exactly the goal's rows with code, in order, with indentation and blank rows ignored. For a recall step it is always `false`; see below. |
 | `compute_us` | Engine judging time in microseconds, for latency measurement. |
 
 Comparison rules in a type-along step: leading spaces and tabs are ignored
@@ -160,15 +160,16 @@ rows are not compared by position: one inserted line would make every row
 below it wrong. Instead the buffer's rows are lined up with the goal's by
 their longest common subsequence, the longest list of rows found in the same
 order in both (indentation ignored, as above), and only the rows left over
-are marked:
+are marked. Blank and whitespace-only rows, in the buffer and in the goal,
+are left out before lining up, so an extra or moved blank row is never
+marked and does not keep the drill from being done:
 
 - Between two lined-up rows, the leftover buffer rows and goal rows are
   paired in order. In each pair only the run that differs is in
   `error_spans`: the common start and end of the two rows are skipped. If
   the buffer row only lacks text, the one character where it is missing is
   marked.
-- A leftover buffer row with no goal row to pair with is marked whole. A
-  blank one has nothing to mark.
+- A leftover buffer row with no goal row to pair with is marked whole.
 - A goal row missing from the buffer has nothing in the buffer to mark; the
   front end shows the goal.
 

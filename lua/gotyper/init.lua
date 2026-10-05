@@ -556,7 +556,7 @@ function M.stop()
   vim.on_key(nil, ns_key)
   if s.augroup then pcall(api.nvim_del_augroup_by_id, s.augroup) end
   ui.close_panel(s.panel)
-  ui.close_panel(s.goal) -- the goal is a { win, buf } pair like the panel
+  pcall(ui.close_panel, s.goal) -- the goal is a { win, buf } pair like the panel
   s.client.stop()
   if not s.wiping and api.nvim_buf_is_valid(s.buf) then pcall(api.nvim_buf_delete, s.buf, { force = true }) end
 end

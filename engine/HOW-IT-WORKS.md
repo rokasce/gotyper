@@ -144,7 +144,8 @@ below one inserted line wrong. Instead:
 
 1. **Line the rows up.** `matchLines` (`judge/align.go`) finds the longest
    common subsequence of the buffer's rows and the goal's, indentation
-   stripped: the longest list of rows that appear in both, in the same
+   stripped and blank rows left out on both sides (an extra or moved blank
+   line changes nothing about the code): the longest list of rows that appear in both, in the same
    order. It fills a table where cell `[i][j]` holds the length of that
    list for the rows from `i` and `j` onwards, working from the bottom
    right, then walks it from the top left to read off which buffer row
@@ -155,8 +156,9 @@ below one inserted line wrong. Instead:
    start and at the end, so renaming `t` to `tot` marks only the `ot`
    still to fix, not the whole row. An unpaired buffer row is extra and is
    marked whole; an unpaired goal row is missing, with nothing to mark.
-3. **Done and stats.** The drill is done when every buffer row matches the
-   goal row of the same number and there are no others. No mistakes are
+3. **Done and stats.** The drill is done when every buffer row with code
+   matches the goal's row with code of the same number and there are no
+   others. No mistakes are
    charged (in normal mode most keys move the cursor), there are no ghosts,
    and the stats are the keystrokes and the time, from the first change to
    the start file until done. The plugin shows the keys against the step's

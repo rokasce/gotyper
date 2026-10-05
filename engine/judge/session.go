@@ -260,29 +260,43 @@ func (s *Session) recallUpdate(lines []string, keys int) Stats {
 //     for each pair only the run of runes that differs is marked (diffRun),
 //     so a renamed variable marks just the name.
 //   - Buffer rows in the stretch with no goal row left to pair with are
-//     extra, and are marked whole. A blank extra row has nothing to mark.
+//     extra, and are marked whole.
 //   - Goal rows with no buffer row left are missing; there is nothing in
 //     the buffer to mark for them, and the goal on show tells the learner.
 //
 // Indentation is ignored, as in type-along: rows are compared with their
-// leading spaces and tabs stripped. The drill is done when the buffer has
-// the goal's rows, in order, and nothing else. No mistakes are charged and
+// leading spaces and tabs stripped. Blank and whitespace-only rows are
+// ignored on both sides, in the marks and in deciding done: an extra or
+// moved blank line changes nothing about the code, and a blank row would
+// have nothing to paint red anyway. The drill is done when the buffer has
+// the goal's rows with code, in order, and no other rows with code. No mistakes are charged and
 // there are no ghosts: in normal mode most keys move the cursor rather than
 // type, so the keystrokes, compared with the step's par, are the score.
 // Stats carries only Keys and Seconds. The clock starts at the first update
 // whose buffer differs from the start file, and stops when the drill is done.
 func (s *Session) drillUpdate(lines []string, keys int) ([]Span, bool, Stats) {
-	got := make([]string, len(lines))
-	offs := make([]int, len(lines)) // byte width of each row's indentation
+	// got and goal hold only the rows with code, indentation stripped;
+	// rows[k] is the buffer row got[k] came from, and offs[k] the byte
+	// width of its indentation.
+	var got, goal []string
+	var rows, offs []int
 	for i, l := range lines {
-		got[i] = strings.TrimLeft(l, " \t")
-		offs[i] = len(l) - len(got[i])
+		if t := strings.TrimLeft(l, " \t"); t != "" {
+			got = append(got, t)
+			rows = append(rows, i)
+			offs = append(offs, len(l)-len(t))
+		}
 	}
-	match := matchLines(got, s.target)
+	for _, t := range s.target {
+		if t != "" {
+			goal = append(goal, t)
+		}
+	}
+	match := matchLines(got, goal)
 
 	spans := []Span{}
-	mark := func(row, col, end int) {
-		spans = append(spans, Span{row, offs[row] + col, offs[row] + end})
+	mark := func(k, col, end int) {
+		spans = append(spans, Span{rows[k], offs[k] + col, offs[k] + end})
 	}
 	// Walk the buffer one stretch at a time. A stretch is the unmatched
 	// buffer rows [gi, gEnd) together with the unmatched goal rows
@@ -293,16 +307,16 @@ func (s *Session) drillUpdate(lines []string, keys int) ([]Span, bool, Stats) {
 		for gEnd < len(got) && match[gEnd] < 0 {
 			gEnd++
 		}
-		wEnd := len(s.target) // after the last matched row, the goal's rest
+		wEnd := len(goal) // after the last matched row, the goal's rest
 		if gEnd < len(got) {
 			wEnd = match[gEnd]
 		}
 		for k := gi; k < gEnd; k++ {
 			if w := wi + (k - gi); w < wEnd {
-				if col, end, ok := diffRun(got[k], s.target[w]); ok {
+				if col, end, ok := diffRun(got[k], goal[w]); ok {
 					mark(k, col, end)
 				}
-			} else if got[k] != "" {
+			} else {
 				mark(k, 0, len(got[k]))
 			}
 		}
@@ -310,7 +324,7 @@ func (s *Session) drillUpdate(lines []string, keys int) ([]Span, bool, Stats) {
 		gi, wi = gEnd+1, wEnd+1
 	}
 
-	done := len(got) == len(s.target)
+	done := len(got) == len(goal)
 	for i, m := range match {
 		if m != i {
 			done = false
