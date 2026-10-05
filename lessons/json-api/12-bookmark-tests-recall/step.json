@@ -1,0 +1,31 @@
+{
+  "title": "Step 12 - recall: testing create from memory",
+  "mode": "recall",
+  "file": "create_test.go",
+  "intro": [
+    "Write step 11's `create_test.go` again, from memory.",
+    "Your `Bookmark`, `Store`, routes and `create` are",
+    "already in the module.",
+    "",
+    "Write a table-driven test of `create`: a table of cases,",
+    "each with a name, a request body and the status it",
+    "wants, and a loop running each case as a `t.Run`",
+    "subtest. Call the handler with `httptest.NewRequest`",
+    "and `httptest.NewRecorder`. Cover:",
+    "",
+    "- a good bookmark, which gets 201;",
+    "- a url that is not http or https, which gets 400.",
+    "",
+    "Malformed JSON, which gets 400, is a good third case,",
+    "as in step 11, but the hidden test does not check it.",
+    "",
+    "Your test must pass against the real `create`. The",
+    "hidden test also runs it against a `create` that skips",
+    "the url check and one that answers 400 to everything:",
+    "it must fail against both.",
+    "",
+    "Press `<F6>` to submit: `go vet` and the step's hidden",
+    "tests decide. If they fail, fix it and submit again."
+  ],
+  "carry": ["03-bookmark-type", "05-bookmark-store", "07-bookmark-routes", "09-bookmark-create"]
+}
