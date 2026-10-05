@@ -32,9 +32,9 @@ func TestCompletedStepIsRecorded(t *testing.T) {
 		t.Skip("runs go vet and go test")
 	}
 	path := filepath.Join(t.TempDir(), "gotyper", "stats.jsonl")
-	step, _ := lessons.Step(firstStep)
+	step, _ := lessons.Step(greetStep)
 	resps := serveStats(t, hello+
-		`{"id":2,"op":"start","step":"`+firstStep+`"}`+"\n"+
+		`{"id":2,"op":"start","step":"`+greetStep+`"}`+"\n"+
 		typeAll(t, 3, step)+
 		`{"id":4,"op":"check","lines":`+linesJSON(t, step.Target)+`}`+"\n", path)
 	if len(resps) != 4 || !resps[2].Render.Done || resps[3].Check == nil || !resps[3].Check.OK {
@@ -49,7 +49,7 @@ func TestCompletedStepIsRecorded(t *testing.T) {
 		t.Fatalf("got %d records, want 1: %+v", len(records), records)
 	}
 	r := records[0]
-	if r.Step != firstStep || r.Mode != lesson.TypeAlong || r.Keys != 700 || r.Errors != 0 ||
+	if r.Step != greetStep || r.Mode != lesson.TypeAlong || r.Keys != 700 || r.Errors != 0 ||
 		r.WPM != want.WPM || r.Accuracy != 100 || r.Seconds != want.Seconds || r.Check != "pass" || r.Time.IsZero() {
 		t.Fatalf("record = %+v, stats were %+v", r, want)
 	}
@@ -59,7 +59,7 @@ func TestCompletedStepIsRecorded(t *testing.T) {
 	if resps[1].Error != nil || got == nil || len(got.Steps) != 1 {
 		t.Fatalf("stats = %+v", resps[1])
 	}
-	if b := got.Steps[0]; b.Step != firstStep || b.Completions != 1 || b.Keys != 700 || b.Accuracy != 100 || !b.LastPlayed.Equal(r.Time) {
+	if b := got.Steps[0]; b.Step != greetStep || b.Completions != 1 || b.Keys != 700 || b.Accuracy != 100 || !b.LastPlayed.Equal(r.Time) {
 		t.Fatalf("bests = %+v", b)
 	}
 }
@@ -72,12 +72,12 @@ func TestAttemptIsRecordedOnce(t *testing.T) {
 		t.Skip("runs go vet and go test")
 	}
 	path := filepath.Join(t.TempDir(), "stats.jsonl")
-	step, _ := lessons.Step(firstStep)
+	step, _ := lessons.Step(greetStep)
 	check := func(id string) string {
 		return `{"id":` + id + `,"op":"check","lines":` + linesJSON(t, step.Target) + `}` + "\n"
 	}
 	resps := serveStats(t, hello+
-		`{"id":2,"op":"start","step":"`+firstStep+`"}`+"\n"+
+		`{"id":2,"op":"start","step":"`+greetStep+`"}`+"\n"+
 		typeAll(t, 3, step)+check("4")+check("5"), path)
 	if len(resps) != 5 {
 		t.Fatalf("got %d responses, want 5", len(resps))
@@ -105,11 +105,11 @@ func TestAbandonedAttemptsAreNotRecorded(t *testing.T) {
 		t.Skip("runs go vet and go test")
 	}
 	path := filepath.Join(t.TempDir(), "stats.jsonl")
-	step, _ := lessons.Step(firstStep)
+	step, _ := lessons.Step(greetStep)
 	recall, _ := lessons.Step(recallStep)
 	edited := append(append([]string{}, recall.Target...), "// edited")
 	resps := serveStats(t, hello+
-		`{"id":2,"op":"start","step":"`+firstStep+`"}`+"\n"+
+		`{"id":2,"op":"start","step":"`+greetStep+`"}`+"\n"+
 		typeAll(t, 3, step)+
 		`{"id":4,"op":"check","lines":`+linesJSON(t, step.Target)+`}`+"\n"+
 		`{"id":5,"op":"restart"}`+"\n"+
@@ -150,7 +150,7 @@ func TestStatsOp(t *testing.T) {
 	}
 
 	path := filepath.Join(dir, "stats.jsonl")
-	good := `{"step":"` + firstStep + `","mode":"type-along","wpm":40,"accuracy":98,"keys":700,"time":"2026-10-01T10:00:00Z"}`
+	good := `{"step":"` + greetStep + `","mode":"type-along","wpm":40,"accuracy":98,"keys":700,"time":"2026-10-01T10:00:00Z"}`
 	if err := os.WriteFile(path, []byte(good+"\nnot json\n"+good[:30]), 0o644); err != nil {
 		t.Fatal(err)
 	}
