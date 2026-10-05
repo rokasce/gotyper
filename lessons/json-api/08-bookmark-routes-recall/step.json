@@ -1,0 +1,25 @@
+{
+  "title": "Step 8 - recall: the routes from memory",
+  "mode": "recall",
+  "file": "routes.go",
+  "intro": [
+    "Write step 7's `routes.go` again, from memory. Your",
+    "`Bookmark` and `Store` are already in the module.",
+    "",
+    "It needs a type `api` with a field `store *Store`, and",
+    "a method `routes() http.Handler` built on a",
+    "`http.ServeMux` with these patterns:",
+    "",
+    "- `GET /bookmarks`: every bookmark as a JSON list, `[]`",
+    "  when there are none;",
+    "- `GET /bookmarks/{id}`: that bookmark as JSON, 400 if",
+    "  the id is not a number, 404 if there is no such one;",
+    "- `POST /bookmarks`: `a.create`, a hidden placeholder.",
+    "",
+    "JSON answers set `Content-Type: application/json`.",
+    "",
+    "Press `<F6>` to submit: `go vet` and the step's hidden",
+    "tests decide. If they fail, fix it and submit again."
+  ],
+  "carry": ["03-bookmark-type", "05-bookmark-store"]
+}

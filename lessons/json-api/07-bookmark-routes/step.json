@@ -1,0 +1,27 @@
+{
+  "title": "Step 7 - routes with method patterns and path values",
+  "mode": "type-along",
+  "file": "routes.go",
+  "intro": [
+    "`api` holds the store, and its methods are the handlers.",
+    "`routes` registers them on an `http.ServeMux` and returns",
+    "it as an `http.Handler`, ready for `ListenAndServe`.",
+    "",
+    "Since Go 1.22 a pattern can start with a method:",
+    "`\"GET /bookmarks\"` matches only GET. For any other",
+    "method on that path the mux answers 405 by itself.",
+    "",
+    "`{id}` is a wildcard: it matches one path segment, and",
+    "`r.PathValue(\"id\")` returns it as a string.",
+    "`strconv.Atoi` turns it into an int, and its error means",
+    "the client sent something else: that is a 400. A number",
+    "the store doesn't have is a 404.",
+    "",
+    "A nil slice encodes as `null`, not `[]`, so `list` swaps",
+    "an empty store's nil for `[]Bookmark{}`.",
+    "",
+    "`a.create` comes in step 9. Until then a hidden",
+    "placeholder answers 501."
+  ],
+  "carry": ["03-bookmark-type", "05-bookmark-store"]
+}
