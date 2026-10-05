@@ -78,7 +78,21 @@ check(m.ghost == 1 and m.vlines == #target - 1,
   ("ghost text: 1 inline + %d virtual lines (got %d inline, %d virtual)"):format(#target - 1, m.ghost, m.vlines))
 check(rq("nvim_get_mode").mode == "i", "starts in insert mode")
 check(s.panel_open, "explanation panel is open")
-check(lua("return vim.wo[require('gotyper').state().win].winbar"):find("WPM", 1, true) ~= nil, "winbar shows the stats")
+local function winbar() return lua("return vim.wo[require('gotyper').state().win].winbar") end
+check(winbar():find("WPM", 1, true) ~= nil, "winbar shows the stats")
+check(s.info.par > 0 and winbar():find(("KEYS 0/%d par"):format(s.info.par), 1, true) ~= nil,
+  "winbar shows the keys against par")
+-- wait_winbar polls the winbar until it shows text, or fails after ms.
+local function wait_winbar(text, ms)
+  local t = vim.uv.now()
+  while vim.uv.now() - t < (ms or 5000) do
+    if winbar():find(text, 1, true) then return true end
+    vim.uv.sleep(20)
+    vim.uv.update_time()
+  end
+  return false
+end
+check(wait_winbar("gotyper  INSERT  "), "winbar shows insert mode")
 
 -- 2. A mistake turns red and is charged.
 type_text("packxge")
@@ -103,6 +117,16 @@ s = state()
 check(not s.checking and s.check == nil and s.panel_title ~= "checking",
   "<F6> runs no check in a type-along step")
 check(s.keys == 7 and rq("nvim_get_mode").mode == "i", "and the learner goes on typing")
+-- The winbar follows vim's mode.
+key("<Esc>")
+check(wait_winbar("gotyper  NORMAL  "), "<Esc> turns the winbar's mode to NORMAL: " .. winbar())
+key("i")
+check(wait_winbar("gotyper  INSERT  "), "i turns it back to INSERT: " .. winbar())
+-- Mode switches edit nothing, yet the winbar's key count still goes up.
+local keys_before = state().keys
+for _, k in ipairs({ "<Esc>", "v", "<Esc>", "A" }) do key(k) end
+check(wait_winbar(("KEYS %d/%d par"):format(keys_before + 4, s.info.par)),
+  "mode switches without an edit raise the winbar's key count: " .. winbar())
 
 -- 4. Restart throws the attempt away: empty buffer, no red, counts back to 0.
 key("<F5>")
@@ -151,6 +175,17 @@ s = wait(function(st) return st.check ~= nil and not st.checking end, 120000)
 check(s.check.ok and s.panel_title == "step passed",
   ("finishing runs go vet + go test, and it passes (%dms: %s)"):format(s.check.ms, s.check.output))
 check(lua("return vim.wo[require('gotyper').state().win].winbar"):find("[DONE]", 1, true) ~= nil, "winbar says DONE")
+-- Every key above typed one character or one line break, which is par.
+local typing_par = s.info.par
+check(s.last.stats.keys == typing_par and winbar():find(("KEYS %d/%d par"):format(typing_par, typing_par), 1, true) ~= nil,
+  ("typing the code key for key is par: %d keys, par %d"):format(s.last.stats.keys, typing_par))
+check(lua([=[
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if vim.api.nvim_win_get_config(w).relative ~= "" then
+      return table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, -1, false), "\n")
+    end
+  end]=]):find(("keystrokes %d   par %d   (on par)"):format(typing_par, typing_par), 1, true) ~= nil,
+  "the result panel shows keys against par")
 print(("stats: wpm=%.1f acc=%.1f%% keys=%d"):format(s.last.stats.wpm, s.last.stats.accuracy, s.last.stats.keys))
 
 -- 6. Closing the tab ends the session cleanly.
@@ -209,7 +244,7 @@ type_text("packx")
 s = wait(function(st) return st.last.stats.keys >= 5 end, 5000)
 m = marks()
 check(m.err == 0 and m.ghost == 0 and #s.last.error_spans == 0, "and nothing turns red")
-check(lua("return vim.wo[require('gotyper').state().win].winbar"):find("recall  KEYS 5", 1, true) ~= nil,
+check(lua("return vim.wo[require('gotyper').state().win].winbar"):find("recall  KEYS 5/", 1, true) ~= nil,
   "winbar shows the keystrokes")
 -- Write the handler but forget the return after http.Error: it compiles,
 -- and the hidden test catches it.
@@ -311,13 +346,14 @@ local float = lua([[
     lines = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win), 0, -1, false) }
 ]])
 check(float.relative == "editor", ":GotyperStats opens a floating window")
-local rows = {}
+local rows, fewest = {}, {}
 for _, l in ipairs(float.lines) do
-  local step, done = l:match("^(%S+)%s.-(%d+)%s+%d%d%d%d%-%d%d%-%d%d %d%d:%d%d$")
-  if step then rows[step] = tonumber(done) end
+  local step, keys, done = l:match("^(%S+)%s+%S+%s+%S+%s+(%d+)%s+(%d+)%s+%d%d%d%d%-%d%d%-%d%d %d%d:%d%d$")
+  if step then rows[step], fewest[step] = tonumber(done), tonumber(keys) end
 end
 check(rows["json-api/01-greet-handler"] == 1 and rows["json-api/02-greet-handler-recall"] == 1 and rows[drill] == 1,
   "it lists each completed step, completed once:\n" .. table.concat(float.lines, "\n"))
+check(fewest["json-api/01-greet-handler"] == typing_par, "and the type-along step's fewest keys, which were par")
 key("q")
 check(lua("return vim.api.nvim_win_get_config(0).relative") == "", "q closes it")
 rq("nvim_command", "GotyperStats")

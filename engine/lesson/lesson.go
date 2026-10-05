@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // Mode says how a step is played and what completes it.
@@ -84,8 +85,10 @@ type Step struct {
 	// Start is what the buffer holds when a drill begins, as lines; it is
 	// nil for other modes.
 	Start []string
-	// Par is the keystroke count of a good way to do a drill, for the
-	// learner to measure their keystrokes against; 0 for other modes.
+	// Par is the keystroke count the learner measures their keystrokes
+	// against. A drill's comes from its step.json: a good way to do it.
+	// A type-along or recall step's is TypingPar of the target: the
+	// fewest keys that type it.
 	Par int
 	// Carried maps a file name to its contents for every target carried
 	// from an earlier step of the same track.
@@ -329,6 +332,9 @@ func loadStep(fsys fs.FS, dir, id string, earlier map[string]Step, failed map[st
 		default:
 			step.Target = splitLines(string(src))
 			from[m.File] = "the target"
+			if m.Mode != Drill {
+				step.Par = TypingPar(step.Target)
+			}
 		}
 	}
 
@@ -425,6 +431,20 @@ func loadStep(fsys fs.FS, dir, id string, earlier map[string]Step, failed map[st
 	}
 
 	return step, errors.Join(errs...)
+}
+
+// TypingPar returns the fewest keys that type target from an empty buffer
+// in insert mode: every character except indentation, plus one Enter per
+// line break. Indentation never counts because the front end inserts it on
+// Enter. A blank line costs only its Enter. It is the par of type-along and
+// recall steps, so the learner can see how many keys their motions and mode
+// switches cost on top of plain typing.
+func TypingPar(target []string) int {
+	par := len(target) - 1 // the Enters between lines
+	for _, line := range target {
+		par += utf8.RuneCountInString(strings.TrimLeft(line, " \t"))
+	}
+	return par
 }
 
 // splitLines turns file contents into lines without their "\n". The final

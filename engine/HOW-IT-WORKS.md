@@ -52,6 +52,10 @@ broken lessons without touching the disk.
    `json.Decoder.DisallowUnknownFields`, so a misspelt field is an error
    instead of being silently dropped. It checks the title and mode, reads the
    target file into lines, and rejects stray files in the step directory.
+   A drill's par comes from `step.json`; for a type-along or recall step
+   `TypingPar` works it out from the target: every character except
+   indentation, plus one Enter per line break. That is the fewest keys
+   that type the code, because the front end inserts indentation on Enter.
 3. It walks `hidden/` with `fs.WalkDir` and keeps every file by its path
    relative to `hidden/`.
 4. It resolves `carry`. Steps are loaded in order, so `loadTrack` keeps a map
@@ -76,8 +80,9 @@ test suite under the step's id.
 `list` answers with the loaded tracks and steps (id, title, mode).
 `start` with `"step":"json-api/01-greet-handler"` looks the id up in the
 library and creates a `judge.Session` for that step. A `start` without a step
-picks the first step of the first track. For a drill the answer also carries
-the start file (`buffer`), the goal and the par, and its render is the
+picks the first step of the first track. The answer carries the step's par
+(see [Loading the lessons](#loading-the-lessons)). For a drill it also
+carries the start file (`buffer`) and the goal, and its render is the
 judgement of the start file rather than of an empty buffer.
 
 ## From a keystroke to a response
@@ -269,7 +274,7 @@ answer.
 | `plugin/gotyper.lua` | Defines `:Gotyper` (with completion of step ids), `:GotyperRestart`, `:GotyperPanel`, `:GotyperSubmit` and `:GotyperStats`. |
 | `lua/gotyper/engine.lua` | Builds this engine into `bin/` when its sources are newer than the binary, starts it as a job, and frames NDJSON requests and responses by `id`. Also asks a short-lived engine for `list` and `stats`. |
 | `lua/gotyper/init.lua` | The step picker and the session: the game tab and buffer, change tracking, key counting, auto-indent, restart, checks and their results, drill results, the panel toggle and teardown. Also `:GotyperStats`. |
-| `lua/gotyper/ui.lua` | Painting: error spans and ghosts as extmarks, ghost lines as virtual lines, the stats winbar, the panel, a drill's goal split and the stats window. |
+| `lua/gotyper/ui.lua` | Painting: error spans and ghosts as extmarks, ghost lines as virtual lines, the stats winbar (vim's mode, the stats, keys against par), the panel, a drill's goal split and the stats window. |
 | `lua/gotyper/health.lua` | `:checkhealth gotyper`: Go on `PATH`, the engine binary (building it when missing or stale), the `hello` handshake and the lessons' track and step counts. |
 | `test/run.sh`, `test/drive.lua`, `test/health.lua` | End-to-end test: a real headless Neovim driven key by key over its RPC socket, then `:checkhealth gotyper` asserted all OK. |
 
@@ -285,6 +290,17 @@ schedules one `update` for when Neovim is next idle, so a paste or a `dd` sends
 one request, not one per line. Each update gets a new `id`. An answer whose `id`
 is older than the newest update sent is dropped, because a newer buffer state is
 already on its way.
+
+The winbar is repainted after every painted answer, after every counted key
+and on every `ModeChanged` in the game buffer, an autocmd local to that
+buffer. It starts with vim's current mode as a short label (`ui.mode_label`:
+INSERT, NORMAL, VISUAL, V-LINE, ...; operator-pending reads NORMAL), so a
+learner who leaves insert mode to jump with motions can see which mode their
+next key lands in. Every step's winbar shows the keys against the step's par,
+such as `KEYS 612/580 par`. While the step runs, the count is the plugin's
+own, so it goes up with a key that edits nothing (`<Esc>`, `v`, a motion)
+and sends no update; once the step is done it is the engine's final count,
+the one the result panel and the stats show.
 
 What happens when the learner presses the restart key (`<F5>`):
 
@@ -313,8 +329,9 @@ What happens when a check runs:
 2. `run_check()` shows "Running go vet + go test..." in the panel and sends
    `check` with the buffer. Updates go on being sent and painted meanwhile.
 3. When the answer comes, `show_result()` fills the panel: PASS or FAIL, the
-   stage that failed, the stats and the go output. In a recall step a pass
-   marks the step done; a fail leaves the learner editing, to submit again.
+   stage that failed, the stats, the keystrokes against par and the go
+   output. In a recall step a pass marks the step done; a fail leaves the
+   learner editing, to submit again.
    `run_check()` remembers the buffer's `changedtick` when it sends the
    check, and a pass for a buffer edited since then does not complete the
    step: the panel says the code changed and asks for another submit.

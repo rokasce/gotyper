@@ -379,9 +379,10 @@ func startInfo(sess *judge.Session) *Start {
 		Indents: sess.Indents(),
 		Lines:   len(step.Target),
 		Width:   sess.Width(),
+		Par:     step.Par,
 	}
 	if step.Mode == lesson.Drill {
-		st.Buffer, st.Goal, st.Par = step.Start, step.Target, step.Par
+		st.Buffer, st.Goal = step.Start, step.Target
 	}
 	return st
 }

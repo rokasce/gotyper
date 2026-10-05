@@ -80,11 +80,23 @@ local function show_intro()
   show_panel(vim.list_extend(vim.deepcopy(S.info.intro), help_lines()), S.info.title)
 end
 
--- update_winbar shows the latest stats, marked while a check runs and once
--- the step is done.
+-- update_winbar shows the latest stats and vim's current mode, marked while
+-- a check runs and once the step is done. The key count is the plugin's own,
+-- which goes up with every key, even one that edits nothing (<Esc>, v, a
+-- motion) and so sends no update. Once done it is the engine's final count,
+-- the one the result panel and the stats show.
 local function update_winbar()
   local suffix = S.checking and "  [checking...]" or S.done and "  [DONE]" or ""
-  ui.set_winbar(S.win, S.last.stats, S.info, suffix)
+  local keys = S.done and S.last.stats.keys or S.keys
+  ui.set_winbar(S.win, S.last.stats, S.info, api.nvim_get_mode().mode, keys, suffix)
+end
+
+-- keys_vs_par describes an attempt's keystrokes against the step's par for
+-- the result panel, such as "keystrokes 9   par 7   (2 over par)".
+local function keys_vs_par(keys, par)
+  local verdict = keys < par and ("%d under par"):format(par - keys)
+    or keys == par and "on par" or ("%d over par"):format(keys - par)
+  return ("keystrokes %d   par %d   (%s)"):format(keys, par, verdict)
 end
 
 -- show_result shows a check result in the panel. A pass completes a recall
@@ -103,8 +115,9 @@ local function show_result(c, tick)
   local lines = {
     c.ok and ("PASS  go vet + go test (%dms)"):format(c.ms) or ("FAIL  at go %s (%dms)"):format(c.stage, c.ms),
     "",
-    S.recall and ("keystrokes %d   %.0fs"):format(st.keys, st.seconds)
-      or ("WPM %.0f   accuracy %.1f%%   keystrokes %d   %.0fs"):format(st.wpm, st.accuracy, st.keys, st.seconds),
+    S.recall and ("%.0fs"):format(st.seconds)
+      or ("WPM %.0f   accuracy %.1f%%   %.0fs"):format(st.wpm, st.accuracy, st.seconds),
+    keys_vs_par(st.keys, S.info.par),
     "",
   }
   -- A buffer line cannot hold a newline, so the output becomes one panel
@@ -153,12 +166,9 @@ end
 -- took against the drill's par. A drill is not compiled; reaching the goal
 -- is what finishes it.
 local function show_drill_result()
-  local keys, par = S.last.stats.keys, S.info.par
-  local verdict = keys < par and ("%d under par"):format(par - keys)
-    or keys == par and "on par" or ("%d over par"):format(keys - par)
   S.panel_hidden = false -- the result is worth showing even if the intro was hidden
   show_panel({
-    ("keystrokes %d   par %d   (%s)"):format(keys, par, verdict),
+    keys_vs_par(S.last.stats.keys, S.info.par),
     ("%.0fs"):format(S.last.stats.seconds),
     "",
     "Press " .. RESTART_KEY .. " to do the drill again.",
@@ -346,6 +356,11 @@ local function install_hooks()
     if S and typed and typed ~= "" and typed ~= panel_key and typed ~= submit_key and not S.done
       and api.nvim_get_current_buf() == S.buf then
       S.keys = S.keys + 1
+      -- Repaint the winbar's count; scheduled, because on_key runs while
+      -- Neovim is still handling the key, where windows may not change.
+      vim.schedule(function()
+        if S and S.last then update_winbar() end
+      end)
     end
   end, ns_key)
 
@@ -355,6 +370,16 @@ local function install_hooks()
 
   local group = api.nvim_create_augroup("gotyper_session", { clear = true })
   S.augroup = group
+  -- The winbar names vim's current mode, so repaint it whenever the mode
+  -- changes in the game buffer (<Esc>, i, v, ...). Buffer-local: modes
+  -- changed in other buffers are not the game's.
+  api.nvim_create_autocmd("ModeChanged", {
+    group = group,
+    buffer = buf,
+    callback = function()
+      if S and S.last then update_winbar() end
+    end,
+  })
   -- The panel is placed relative to the window size, so place it again.
   api.nvim_create_autocmd({ "VimResized", "WinResized" }, {
     group = group,
