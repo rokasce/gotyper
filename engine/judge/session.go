@@ -269,9 +269,10 @@ func (s *Session) recallUpdate(lines []string, keys int) Stats {
 // ignored on both sides, in the marks and in deciding done: an extra or
 // moved blank line changes nothing about the code, and a blank row would
 // have nothing to paint red anyway. The drill is done when the buffer has
-// the goal's rows with code, in order, and no other rows with code. No mistakes are charged and
-// there are no ghosts: in normal mode most keys move the cursor rather than
-// type, so the keystrokes, compared with the step's par, are the score.
+// the goal's rows with code, in order, and no other rows with code. No
+// mistakes are charged and there are no ghosts: in normal mode most keys
+// move the cursor rather than type, so the keystrokes, compared with the
+// step's par, are the score.
 // Stats carries only Keys and Seconds. The clock starts at the first update
 // whose buffer differs from the start file, and stops when the drill is done.
 func (s *Session) drillUpdate(lines []string, keys int) ([]Span, bool, Stats) {
