@@ -17,8 +17,12 @@ func (a *api) routes() http.Handler {
 }
 
 func (a *api) list(w http.ResponseWriter, r *http.Request) {
+	list := a.store.List()
+	if list == nil {
+		list = []Bookmark{}
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(a.store.List())
+	json.NewEncoder(w).Encode(list)
 }
 
 func (a *api) get(w http.ResponseWriter, r *http.Request) {

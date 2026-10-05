@@ -17,6 +17,9 @@
     "the client sent something else: that is a 400. A number",
     "the store doesn't have is a 404.",
     "",
+    "A nil slice encodes as `null`, not `[]`, so `list` swaps",
+    "an empty store's nil for `[]Bookmark{}`.",
+    "",
     "`a.create` comes in step 9. Until then a hidden",
     "placeholder answers 501."
   ],

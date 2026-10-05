@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // post sends body to POST /bookmarks through the handler that routes builds,
@@ -23,6 +24,8 @@ func TestCreateRejectsBadInput(t *testing.T) {
 		{"malformed JSON", `{"url": "https://go.dev"`},
 		{"not a JSON object", `"https://go.dev"`},
 		{"an unknown field", `{"url": "https://go.dev", "tags": ["go"]}`},
+		{"an id, which the store assigns", `{"url": "https://go.dev", "id": 7}`},
+		{"a created time, which the server sets", `{"url": "https://go.dev", "created": "1999-01-01T00:00:00Z"}`},
 		{"no url", `{"title": "Go"}`},
 		{"an empty url", `{"url": ""}`},
 		{"a url that is not http or https", `{"url": "ftp://go.dev"}`},
@@ -47,7 +50,9 @@ func TestCreate(t *testing.T) {
 	a := &api{store: &Store{}}
 	a.store.Add(Bookmark{URL: "https://go.dev"})
 
+	before := time.Now()
 	rec := post(t, a, `{"url": "https://pkg.go.dev/net/http", "title": "net/http"}`)
+	after := time.Now()
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body: %s", rec.Code, rec.Body)
 	}
@@ -58,12 +63,23 @@ func TestCreate(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("body %q is not a JSON bookmark: %v", rec.Body, err)
 	}
+	if got.Created.Before(before) || got.Created.After(after) {
+		t.Fatalf("created = %v, want the time of the request, set by the server with time.Now()", got.Created)
+	}
+	stored, ok := a.store.Get(2)
+	if !ok || !stored.Created.Equal(got.Created) {
+		t.Fatalf("store.Get(2) = %+v, %v; want the bookmark that was answered, %+v", stored, ok, got)
+	}
+
+	// Created is checked above; time.Time values are compared with Equal, not
+	// ==, so clear it before comparing the rest of the bookmark.
+	got.Created, stored.Created = time.Time{}, time.Time{}
 	want := Bookmark{ID: 2, URL: "https://pkg.go.dev/net/http", Title: "net/http"}
 	if got != want {
 		t.Fatalf("got %+v, want %+v: the bookmark as stored, with its new id", got, want)
 	}
-	if stored, ok := a.store.Get(2); !ok || stored != want {
-		t.Fatalf("store.Get(2) = %+v, %v; want %+v, true", stored, ok, want)
+	if stored != want {
+		t.Fatalf("store.Get(2) = %+v; want %+v", stored, want)
 	}
 
 	if rec := post(t, a, `{"url": "http://example.com"}`); rec.Code != http.StatusCreated {

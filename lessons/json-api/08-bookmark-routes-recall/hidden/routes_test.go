@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -18,10 +19,15 @@ func serve(t *testing.T, a *api, method, target string) *httptest.ResponseRecord
 
 func TestRoutes(t *testing.T) {
 	a := &api{store: &Store{}}
+	rec := serve(t, a, "GET", "/bookmarks")
+	if body := strings.TrimSpace(rec.Body.String()); rec.Code != http.StatusOK || body != "[]" {
+		t.Fatalf("GET /bookmarks on an empty store: status %d, body %q; want 200 and [] (a nil slice encodes as null)", rec.Code, body)
+	}
+
 	first := a.store.Add(Bookmark{URL: "https://go.dev", Title: "Go"})
 	second := a.store.Add(Bookmark{URL: "https://pkg.go.dev"})
 
-	rec := serve(t, a, "GET", "/bookmarks")
+	rec = serve(t, a, "GET", "/bookmarks")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /bookmarks: status = %d, want 200", rec.Code)
 	}
