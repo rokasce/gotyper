@@ -177,12 +177,18 @@ lua([[
   vim.cmd('Gotyper')
 ]])
 local pick = lua("return _G.gotyper_pick")
-check(pick.items[1].id == step_id, "the picker offers the steps by id")
-check(pick.labels[1] == "json-api: Step 1 - a JSON handler with errors as values (type-along)",
-  "each step shows its track, title and mode (" .. pick.labels[1] .. ")")
+-- Tracks are listed in directory order, so find the step rather than
+-- assuming which track comes first.
+local pick_i
+for i, item in ipairs(pick.items) do
+  if item.id == step_id then pick_i = i end
+end
+check(pick_i ~= nil, "the picker offers the steps by id")
+check(pick.labels[pick_i] == "json-api: Step 1 - a JSON handler with errors as values (type-along)",
+  "each step shows its track, title and mode (" .. tostring(pick.labels[pick_i]) .. ")")
 lua("_G.gotyper_choose(nil)")
 check(state() == nil and #rq("nvim_list_tabpages") == 1, "cancelling the picker starts nothing")
-lua("_G.gotyper_choose(_G.gotyper_pick.items[1])")
+lua("_G.gotyper_choose(_G.gotyper_pick.items[" .. pick_i .. "])")
 s = wait(function(st) return st.info ~= vim.NIL and st.info ~= nil and st.last ~= vim.NIL and st.last ~= nil end, 10000)
 check(s.info.step == step_id, "choosing a step starts it")
 rq("nvim_command", "tabclose")

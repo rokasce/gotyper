@@ -1,0 +1,25 @@
+{
+  "title": "Step 1 - a generic stack",
+  "mode": "type-along",
+  "file": "stack.go",
+  "intro": [
+    "Type the ghost text. Mistakes turn red;",
+    "fix them with any vim motion.",
+    "",
+    "`Stack[T any]` is generic: `T` is a type parameter, so",
+    "one `Stack` holds ints, strings or anything else, and",
+    "`Stack[int]` only ever holds ints. The values live in a",
+    "slice; the top is its last element.",
+    "",
+    "`Pop` and `Peek` return `(T, bool)`, the comma-ok form:",
+    "on an empty stack there is no value to give, so they",
+    "return `T`'s zero value and false.",
+    "",
+    "`Pop` sets the slot it vacates to the zero value before",
+    "shrinking the slice. The array behind the slice keeps",
+    "that slot, so a pointer left there would keep its value",
+    "alive and the garbage collector could never reclaim it.",
+    "",
+    "Indentation is inserted for you on `<Enter>`."
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "title": "Step 3 - a queue in a ring buffer",
+  "mode": "type-along",
+  "file": "queue.go",
+  "intro": [
+    "`Queue[T any]` is first in, first out. Dequeuing with",
+    "`s = s[1:]` is short, but the slice's start only moves",
+    "forward: the array behind it never reuses the room at",
+    "the front, so `append` keeps copying to new arrays.",
+    "",
+    "A ring buffer reuses that room. `head` is the index of",
+    "the oldest value and `count` how many there are. The",
+    "slots run on past the end and wrap to index 0, which is",
+    "what `% len(q.items)` does: the next free slot is",
+    "`(head+count) % len`, and `Dequeue` moves `head` on by",
+    "one, modulo the length. Like `Pop`, it zeroes the slot",
+    "it vacates.",
+    "",
+    "When the ring is full, `grow` makes a slice twice as",
+    "long and copies the values into it oldest first, from",
+    "index 0. The ring is unrolled: values that had wrapped",
+    "to the front now sit after the older ones, and `head`",
+    "is 0 again."
+  ]
+}

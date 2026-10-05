@@ -14,8 +14,10 @@ import (
 	"github.com/rokasce/gotyper/engine/lesson"
 )
 
-// lessons is the repository's lessons directory, loaded once. The tests
-// play its first step, json-api/01-greet-handler (28 lines of handler.go).
+// lessons is the repository's lessons directory, loaded once. Most tests
+// play greetStep, json-api/01-greet-handler (28 lines of handler.go), by its
+// id. Tests about which step comes first ask the library instead, so a new
+// track that sorts earlier does not break them.
 var lessons = func() lesson.Library {
 	lib, err := lesson.Load(os.DirFS("../../lessons"))
 	if err != nil {
@@ -25,7 +27,7 @@ var lessons = func() lesson.Library {
 }()
 
 const (
-	firstStep  = "json-api/01-greet-handler"
+	greetStep  = "json-api/01-greet-handler"
 	recallStep = "json-api/02-greet-handler-recall"
 )
 
@@ -142,7 +144,7 @@ func TestUpdateBeforeStart(t *testing.T) {
 
 func TestStartUpdateRoundTrip(t *testing.T) {
 	resps := serve(t, hello+
-		`{"id":2,"op":"start"}`+"\n"+
+		`{"id":2,"op":"start","step":"`+greetStep+`"}`+"\n"+
 		`{"id":3,"op":"update","lines":["packx"],"keys":5,"cursor":[0,5]}`+"\n"+
 		// The last line has no trailing newline: it must still be answered.
 		`{"id":4,"op":"update","lines":["package main"],"keys":13,"cursor":[0,12]}`)
@@ -203,18 +205,26 @@ func TestBlankLinesAreIgnored(t *testing.T) {
 func TestListAndStartByID(t *testing.T) {
 	resps := serve(t, hello+
 		`{"id":2,"op":"list"}`+"\n"+
-		`{"id":3,"op":"start","step":"`+firstStep+`"}`+"\n"+
+		`{"id":3,"op":"start","step":"`+greetStep+`"}`+"\n"+
 		`{"id":4,"op":"start","step":"json-api/99-nope"}`+"\n"+
 		`{"id":5,"op":"update","lines":["p"],"keys":1,"cursor":[0,1]}`+"\n")
 	list := resps[1].List
-	if resps[1].Error != nil || list == nil || len(list.Tracks) == 0 || list.Tracks[0].ID != "json-api" {
-		t.Fatalf("list = %+v (error %+v)", list, resps[1].Error)
+	if resps[1].Error != nil || list == nil || len(list.Tracks) != len(lessons.Tracks) {
+		t.Fatalf("list = %+v (error %+v), want %d tracks", list, resps[1].Error, len(lessons.Tracks))
 	}
-	got := list.Tracks[0].Steps[0]
-	if got.ID != firstStep || got.Title == "" || got.Mode != lesson.TypeAlong {
-		t.Fatalf("first listed step = %+v", got)
+	// The list gives every track and step in the library's order.
+	for i, track := range lessons.Tracks {
+		lt := list.Tracks[i]
+		if lt.ID != track.ID || len(lt.Steps) != len(track.Steps) {
+			t.Fatalf("listed track %d = %s with %d steps, want %s with %d", i, lt.ID, len(lt.Steps), track.ID, len(track.Steps))
+		}
+		for j, step := range track.Steps {
+			if got := lt.Steps[j]; got.ID != step.ID || got.Title != step.Title || got.Mode != step.Mode {
+				t.Fatalf("listed step %+v, want %s %q (%s)", got, step.ID, step.Title, step.Mode)
+			}
+		}
 	}
-	if st := resps[2].Start; resps[2].Error != nil || st == nil || st.Step != firstStep || st.Mode != lesson.TypeAlong {
+	if st := resps[2].Start; resps[2].Error != nil || st == nil || st.Step != greetStep || st.Mode != lesson.TypeAlong {
 		t.Fatalf("start by id = %+v (error %+v)", st, resps[2].Error)
 	}
 	if e := resps[3].Error; e == nil || e.Code != CodeUnknownStep || !strings.Contains(e.Message, "99-nope") {
@@ -227,8 +237,12 @@ func TestListAndStartByID(t *testing.T) {
 }
 
 func TestStartWithoutIDPicksTheFirstStep(t *testing.T) {
+	first, ok := lessons.First()
+	if !ok {
+		t.Fatal("the lessons directory has no steps")
+	}
 	resps := serve(t, hello+`{"id":2,"op":"start"}`+"\n")
-	if st := resps[1].Start; st == nil || st.Step != firstStep {
+	if st := resps[1].Start; st == nil || st.Step != first.ID {
 		t.Fatalf("start = %+v", resps[1])
 	}
 }
@@ -262,9 +276,9 @@ func TestCheckDoesNotBlockUpdates(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go vet and go test")
 	}
-	step, _ := lessons.Step(firstStep)
+	step, _ := lessons.Step(greetStep)
 	resps := serve(t, hello+
-		`{"id":2,"op":"start","step":"`+firstStep+`"}`+"\n"+
+		`{"id":2,"op":"start","step":"`+greetStep+`"}`+"\n"+
 		`{"id":3,"op":"check","lines":`+linesJSON(t, step.Target)+`}`+"\n"+
 		`{"id":4,"op":"update","lines":["p"],"keys":1,"cursor":[0,1]}`+"\n")
 	if len(resps) != 4 {
@@ -333,7 +347,7 @@ func TestCancelStopsChecksAndCleansUp(t *testing.T) {
 		return dirs
 	}
 
-	step, _ := lessons.Step(firstStep)
+	step, _ := lessons.Step(greetStep)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	in, feed := io.Pipe()
@@ -343,7 +357,7 @@ func TestCancelStopsChecksAndCleansUp(t *testing.T) {
 		served <- NewServer(ctx, lessons, filepath.Join(t.TempDir(), "stats.jsonl")).Serve(in, io.Discard)
 	}()
 	go io.WriteString(feed, hello+
-		`{"id":2,"op":"start","step":"`+firstStep+`"}`+"\n"+
+		`{"id":2,"op":"start","step":"`+greetStep+`"}`+"\n"+
 		`{"id":3,"op":"check","lines":`+linesJSON(t, step.Target)+`}`+"\n")
 
 	deadline := time.Now().Add(30 * time.Second)

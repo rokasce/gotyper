@@ -1,0 +1,24 @@
+{
+  "title": "Step 2 - recall: the stack from memory",
+  "mode": "recall",
+  "file": "stack.go",
+  "intro": [
+    "Write step 1's `stack.go` again, from memory.",
+    "There is no ghost text and nothing turns red.",
+    "",
+    "It needs a generic `Stack[T any]` backed by a slice,",
+    "whose zero value is an empty stack, with:",
+    "",
+    "- `Push(v T)`, which puts `v` on top;",
+    "- `Pop() (T, bool)`, which removes and returns the top,",
+    "  or the zero value and false when empty, and sets the",
+    "  vacated slot to the zero value;",
+    "- `Peek() (T, bool)`, the top without removing it;",
+    "- `Len() int`, how many values it holds.",
+    "",
+    "A hidden test checks that a popped pointer is freed.",
+    "",
+    "Press `<F6>` to submit: `go vet` and the step's hidden",
+    "tests decide. If they fail, fix it and submit again."
+  ]
+}

@@ -4,7 +4,8 @@ Each directory here is a **track**: a sequence of steps that builds one
 program. Each numbered directory in a track is a **step**: one file the
 learner types, plus everything needed to compile and test it. The engine
 loads this directory at start-up (`engine/lesson`) and refuses to start if a
-lesson is malformed.
+lesson is malformed. Tracks are listed in directory-name (alphabetical)
+order, so a track's name decides where it appears.
 
 ```
 lessons/
