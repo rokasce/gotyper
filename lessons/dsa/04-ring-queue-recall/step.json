@@ -1,0 +1,27 @@
+{
+  "title": "Step 4 - recall: the ring queue from memory",
+  "mode": "recall",
+  "file": "queue.go",
+  "intro": [
+    "Write step 3's `queue.go` again, from memory.",
+    "There is no ghost text and nothing turns red.",
+    "",
+    "It needs a generic `Queue[T any]`, a ring buffer over a",
+    "slice with a head index and a count, whose zero value",
+    "is an empty queue, with:",
+    "",
+    "- `Enqueue(v T)`, which adds `v` at the back, doubling",
+    "  the slice when it is full and keeping the order;",
+    "- `Dequeue() (T, bool)`, which removes and returns the",
+    "  oldest value, or the zero value and false when empty,",
+    "  and sets the vacated slot to the zero value;",
+    "- `Len() int`, how many values it holds.",
+    "",
+    "Hidden tests grow the queue while its values wrap past",
+    "the end of the slice, and check that a dequeued pointer",
+    "is freed.",
+    "",
+    "Press `<F6>` to submit: `go vet` and the step's hidden",
+    "tests decide. If they fail, fix it and submit again."
+  ]
+}
