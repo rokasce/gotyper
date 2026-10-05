@@ -31,10 +31,12 @@ When every line matches, gotyper compiles and tests what you typed (`go vet`, th
 
 Some steps are **recall** steps: you write the file from memory, with no ghost text and nothing turning red, and the bar shows only keystrokes and time. Press `<F6>` to submit. If `go vet` or the tests fail, the panel shows why; fix the code and submit again. The step is done when the check passes; if you edit while the check runs, submit again so the edited code is checked. Pick a recall step from `:Gotyper` like any other, or start one directly, for example `:Gotyper json-api/02-greet-handler-recall`.
 
+Some steps are **drills**, in the `vim-drills` track: refactor drills that practise vim's editing commands on Go code. The buffer opens holding some code, the goal is shown in a read-only split below it, and you start in normal mode. Edit the buffer until it matches the goal (indentation and blank lines aside); lines that differ from the goal are marked red, and only the part of a line that differs. Every key you press counts, motions included, and the bar shows your keys against the drill's par, a reasonable way to do it that the intro shows as a hint. When the buffer matches, the panel shows your keys against par. A drill is not compiled.
+
 | Key (normal or insert mode) | Command | What it does |
 |---|---|---|
-| `<F5>` | `:GotyperRestart` | Throw the attempt away and type the step again from an empty buffer. The error count, keystrokes and timer start over. |
-| `<F6>` | `:GotyperSubmit` | Compile and test what is in the buffer now. This is how you finish a recall step. A type-along step is checked automatically when its text matches, so there it only says so. |
+| `<F5>` | `:GotyperRestart` | Throw the attempt away and type the step again from an empty buffer (in a drill, from its starting code). The error count, keystrokes and timer start over. |
+| `<F6>` | `:GotyperSubmit` | Compile and test what is in the buffer now. This is how you finish a recall step. A type-along step is checked automatically when its text matches, and a drill is done when it matches the goal, so there it only says so. |
 | `<F2>` | `:GotyperPanel` | Hide or show the explanation panel, for when it covers code in a small terminal. |
 | `:tabclose` or `:q` | | End the game. The engine stops and the game buffer is wiped. |
 
@@ -42,7 +44,7 @@ To use other keys, map `:GotyperRestart`, `:GotyperSubmit` and `:GotyperPanel` t
 
 ### Your stats
 
-Every time you finish a step (a type-along step whose check passes, or a recall step you submit and pass), gotyper records the attempt: WPM, accuracy, keystrokes, charged errors and time. Restarted or abandoned attempts are not recorded. `:GotyperStats` opens a window listing each step you have finished with your best WPM, best accuracy, fewest keystrokes, how many times you finished it and when you last played it; `q` or `<Esc>` closes it. Recall steps have no WPM or accuracy, so those show `-`.
+Every time you finish a step (a type-along step whose check passes, a recall step you submit and pass, or a drill whose buffer matches the goal), gotyper records the attempt: WPM, accuracy, keystrokes, charged errors and time. Restarted or abandoned attempts are not recorded. `:GotyperStats` opens a window listing each step you have finished with your best WPM, best accuracy, fewest keystrokes, how many times you finished it and when you last played it; `q` or `<Esc>` closes it. Recall steps and drills have no WPM or accuracy, so those show `-`.
 
 The records live in `gotyper/stats.jsonl` under `$XDG_DATA_HOME`, or under `~/.local/share` when that is not set: the same place Neovim keeps its data. The file has one JSON line per finished step; [`engine/PROTOCOL.md`](engine/PROTOCOL.md) describes them.
 
@@ -68,4 +70,4 @@ go build -o ../bin/gotyper-engine ./cmd/gotyper-engine     # build the binary; i
 
 ## Lessons
 
-The lessons live in [`lessons/`](lessons/), one directory per track and one per step. [`lessons/README.md`](lessons/README.md) describes the format. `go test ./...` in `engine/` compiles and tests every step.
+The lessons live in [`lessons/`](lessons/), one directory per track and one per step. [`lessons/README.md`](lessons/README.md) describes the format. `go test ./...` in `engine/` compiles and tests every step, except drills, which are only checked to be gofmt-clean Go.

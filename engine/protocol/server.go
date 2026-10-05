@@ -233,6 +233,10 @@ func (s *Server) Handle(req Request) Response {
 		s.mu.Lock()
 		s.lines = req.Lines
 		s.mu.Unlock()
+		// A drill has no check: reaching the goal is what completes it.
+		if step := s.session.Step(); step.Mode == lesson.Drill && s.last.Done && s.claimDrill() {
+			s.record(stats.Record{Step: step.ID, Mode: step.Mode, Keys: s.last.Stats.Keys, Seconds: s.last.Stats.Seconds, Time: time.Now()})
+		}
 		render := s.last // a copy, so the response keeps it after the next update
 		return Response{ID: req.ID, Op: req.Op, Render: &render}
 	case OpRestart:
@@ -299,20 +303,38 @@ func (s *Server) checkJob(req Request) func() Response {
 	return func() Response {
 		res := check.Run(ctx, step, source)
 		if res.OK && complete && s.claimRecord(attempt, req.Lines) {
-			rec := stats.Record{
+			s.record(stats.Record{
 				Step: step.ID, Mode: step.Mode,
 				WPM: stat.WPM, Accuracy: stat.Accuracy, Keys: stat.Keys, Errors: stat.Errors, Seconds: stat.Seconds,
 				Check: "pass", CheckMS: res.MS, Time: time.Now(),
-			}
-			// Losing a record should not cost the learner the check's
-			// answer, so the error only goes to stderr, which the plugin
-			// shows as a warning.
-			if err := stats.Append(s.statsPath, rec); err != nil {
-				fmt.Fprintln(os.Stderr, "gotyper-engine: recording stats:", err)
-			}
+			})
 		}
 		return Response{ID: req.ID, Op: req.Op, Check: &res}
 	}
+}
+
+// record adds rec to the stats file. Losing a record should not cost the
+// learner the answer to their request, so an error only goes to stderr,
+// which the plugin shows as a warning. It may be called from any goroutine:
+// statsPath never changes.
+func (s *Server) record(rec stats.Record) {
+	if err := stats.Append(s.statsPath, rec); err != nil {
+		fmt.Fprintln(os.Stderr, "gotyper-engine: recording stats:", err)
+	}
+}
+
+// claimDrill reports whether a drill attempt that has just reached its goal
+// should be recorded, which it should unless it is recorded already: the
+// learner may edit the finished buffer away from the goal and back, and the
+// attempt still counts once. If so it marks the attempt recorded.
+func (s *Server) claimDrill() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.recorded {
+		return false
+	}
+	s.recorded = true
+	return true
 }
 
 // claimRecord reports whether a check of attempt with lines should be
@@ -330,12 +352,16 @@ func (s *Server) claimRecord(attempt int, lines []string) bool {
 }
 
 // started answers start and restart alike: the step's layout plus the render
-// of an empty buffer, so the front end can paint the fresh attempt straight
-// away without a separate update.
+// of the buffer the attempt begins with (empty, or a drill's start file), so
+// the front end can paint the fresh attempt straight away without a separate
+// update.
 func (s *Server) started(req Request) Response {
 	s.mu.Lock()
 	s.attempt++ // a check of the previous attempt no longer completes it
 	s.lines = []string{""}
+	if step := s.session.Step(); step.Mode == lesson.Drill {
+		s.lines = step.Start // a drill begins with its start file in the buffer
+	}
 	s.recorded = false
 	s.mu.Unlock()
 	s.last = s.session.Update(s.lines, 0, [2]int{})
@@ -345,7 +371,7 @@ func (s *Server) started(req Request) Response {
 
 func startInfo(sess *judge.Session) *Start {
 	step := sess.Step()
-	return &Start{
+	st := &Start{
 		Step:    step.ID,
 		Mode:    step.Mode,
 		Title:   step.Title,
@@ -354,6 +380,10 @@ func startInfo(sess *judge.Session) *Start {
 		Lines:   len(step.Target),
 		Width:   sess.Width(),
 	}
+	if step.Mode == lesson.Drill {
+		st.Buffer, st.Goal, st.Par = step.Start, step.Target, step.Par
+	}
+	return st
 }
 
 // listInfo summarises the library for the list op.

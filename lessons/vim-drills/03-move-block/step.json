@@ -1,0 +1,14 @@
+{
+  "title": "Drill 3 - move a block",
+  "mode": "drill",
+  "file": "goal.go",
+  "start": "start.go",
+  "par": 7,
+  "intro": [
+    "Move the `point` type up, above `main`, where a reader meets it first. The goal is shown below the code.",
+    "",
+    "`dap` deletes a paragraph: a block of lines and the blank line around it. At the end of the file there is no blank line after it, so it takes the one before. `p` puts deleted lines below the cursor's line.",
+    "",
+    "Par 7: `G` `dap` `3G` `p`"
+  ]
+}

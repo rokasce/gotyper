@@ -245,9 +245,59 @@ rq("nvim_command", "tabclose")
 vim.uv.sleep(200)
 check(state() == nil, "closing the tab ends the recall game")
 
+-- 8b. A drill: the buffer opens with the start text and the goal below it,
+--     in normal mode. Every key counts against par; reaching the goal shows
+--     the result, and <F5> puts the start text back.
+local drill = "vim-drills/03-move-block"
+local start_text, goal_text = {}, {}
+for l in io.lines(root .. "/lessons/" .. drill .. "/start.go") do start_text[#start_text + 1] = l end
+for l in io.lines(root .. "/lessons/" .. drill .. "/goal.go") do goal_text[#goal_text + 1] = l end
+check(vim.tbl_contains(vim.tbl_map(function(st) return st.id end, pick.items), drill), "the picker offers the drill")
+rq("nvim_command", "Gotyper " .. drill)
+s = wait(function(st) return st.info ~= nil and st.last ~= nil and st.info.mode == "drill" end, 10000)
+check(vim.deep_equal(rq("nvim_buf_get_lines", s.buf, 0, -1, false), start_text), "the drill opens with its start text")
+check(s.goal_open and vim.deep_equal(lua([[
+  local s = require('gotyper').state()
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    local b = vim.api.nvim_win_get_buf(w)
+    if b ~= s.buf and vim.api.nvim_win_get_config(w).relative == "" then
+      return vim.api.nvim_buf_get_lines(b, 0, -1, false)
+    end
+  end]]), goal_text), "the goal is shown in a split")
+check(rq("nvim_get_mode").mode == "n" and lua("return vim.api.nvim_get_current_buf()") == s.buf,
+  "it starts in normal mode in the game buffer")
+check(#s.last.error_spans > 0 and not s.last.done, "the lines that differ from the goal are marked")
+-- A wrong move first, to test restart: dd deletes the package line.
+key("d")
+key("d")
+s = wait(function(st) return st.keys == 2 and #rq("nvim_buf_get_lines", st.buf, 0, -1, false) == #start_text - 1 end, 5000)
+key("<F5>")
+s = wait(function(st) return st.keys == 0 and st.last.stats.keys == 0 end, 5000)
+check(vim.deep_equal(rq("nvim_buf_get_lines", s.buf, 0, -1, false), start_text), "<F5> puts the start text back")
+check(rq("nvim_get_mode").mode == "n", "and stays in normal mode")
+-- The hint's keys: G dap 3G p, which is par.
+for _, k in ipairs({ "G", "d", "a", "p", "3", "G", "p" }) do key(k) end
+s = wait(function(st) return st.done end, 5000)
+check(vim.deep_equal(rq("nvim_buf_get_lines", s.buf, 0, -1, false), goal_text), "the buffer equals the goal")
+check(s.keys == s.info.par and s.last.stats.keys == s.info.par,
+  ("every key is counted: %d keys, par %d"):format(s.keys, s.info.par))
+check(lua("return vim.wo[require('gotyper').state().win].winbar"):find("KEYS 7/7 par", 1, true) ~= nil,
+  "winbar shows keys against par")
+check(s.panel_open and s.panel_title == "drill done" and lua([=[
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if vim.api.nvim_win_get_config(w).relative ~= "" then
+      return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(w), 0, 1, false)[1]
+    end
+  end]=]):find("keystrokes 7   par 7   (on par)", 1, true) ~= nil,
+  "the result panel shows keys against par")
+rq("nvim_command", "quit")
+vim.uv.sleep(200)
+check(state() == nil and #rq("nvim_list_tabpages") == 1, ":q in the game window ends the drill and closes its tab")
+
 -- 9. :GotyperStats lists each completed step once: the type-along step from
---    section 5 and the recall step from section 8. The restarted attempts
---    and the pass for code edited while it was checked are not counted.
+--    section 5, the recall step from section 8 and the drill from 8b. The
+--    restarted attempts and the pass for code edited while it was checked
+--    are not counted.
 rq("nvim_command", "GotyperStats")
 local float = lua([[
   local win = vim.api.nvim_get_current_win()
@@ -260,7 +310,7 @@ for _, l in ipairs(float.lines) do
   local step, done = l:match("^(%S+)%s.-(%d+)%s+%d%d%d%d%-%d%d%-%d%d %d%d:%d%d$")
   if step then rows[step] = tonumber(done) end
 end
-check(rows["json-api/01-greet-handler"] == 1 and rows["json-api/02-greet-handler-recall"] == 1,
+check(rows["json-api/01-greet-handler"] == 1 and rows["json-api/02-greet-handler-recall"] == 1 and rows[drill] == 1,
   "it lists each completed step, completed once:\n" .. table.concat(float.lines, "\n"))
 key("q")
 check(lua("return vim.api.nvim_win_get_config(0).relative") == "", "q closes it")

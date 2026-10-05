@@ -1,0 +1,14 @@
+{
+  "title": "Drill 2 - check the error",
+  "mode": "drill",
+  "file": "goal.go",
+  "start": "start.go",
+  "par": 43,
+  "intro": [
+    "`os.WriteFile` returns an error, and `save` drops it. Wrap the call in an `if` that returns the error. The goal is shown below the code.",
+    "",
+    "`if err := f(); err != nil {` runs `f` and checks its error in one statement, and keeps `err` scoped to the `if`. `I` inserts before the first non-blank character and `A` appends at the end of the line; after a `{`, Enter indents the next line, and a `}` typed first on a line lines up with its `{`.",
+    "",
+    "Par 43: `5j` `I` `if err := ` `<Esc>` `A` `; err != nil {` `<Enter>` `return err` `<Enter>` `}` `<Esc>`"
+  ]
+}

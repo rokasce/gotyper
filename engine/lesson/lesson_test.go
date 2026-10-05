@@ -90,6 +90,25 @@ func TestLoadRecallStep(t *testing.T) {
 	}
 }
 
+// withDrill adds a valid drill step, t/03-drill, to fsys.
+func withDrill(fsys fstest.MapFS) fstest.MapFS {
+	fsys["t/03-drill/step.json"] = file(`{"title":"Drill","mode":"drill","file":"goal.go","start":"start.go","par":7}`)
+	fsys["t/03-drill/goal.go"] = file("package main\n\nfunc b() {}\n")
+	fsys["t/03-drill/start.go"] = file("package main\n\nfunc a() {}\n")
+	return fsys
+}
+
+func TestLoadDrillStep(t *testing.T) {
+	lib, err := Load(withDrill(twoSteps()))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	d, _ := lib.Step("t/03-drill")
+	if d.Mode != Drill || d.Par != 7 || len(d.Start) != 3 || d.Start[2] != "func a() {}" || d.Target[2] != "func b() {}" {
+		t.Fatalf("drill = %+v", d)
+	}
+}
+
 func TestWriteModule(t *testing.T) {
 	lib, err := Load(twoSteps())
 	if err != nil {
@@ -169,13 +188,28 @@ func TestLoadErrors(t *testing.T) {
 		{"bad step directory name", func(f fstest.MapFS) {
 			f["t/three/step.json"] = file(meta1)
 		}, []string{"step t/three: directory name must be NN-slug"}},
+		{"drill without a start file", func(f fstest.MapFS) {
+			f["t/03-drill/step.json"] = file(`{"title":"Drill","mode":"drill","file":"goal.go","par":7}`)
+		}, []string{"step t/03-drill: step.json: start is missing"}},
+		{"drill start file missing", func(f fstest.MapFS) {
+			delete(f, "t/03-drill/start.go")
+		}, []string{"step t/03-drill: start file start.go is missing"}},
+		{"drill without a par", func(f fstest.MapFS) {
+			f["t/03-drill/step.json"] = file(`{"title":"Drill","mode":"drill","file":"goal.go","start":"start.go"}`)
+		}, []string{"step t/03-drill: step.json: par must be a keystroke count above 0"}},
+		{"drill with hidden files", func(f fstest.MapFS) {
+			f["t/03-drill/hidden/go.mod"] = file("module m\n")
+		}, []string{"step t/03-drill: unexpected hidden"}},
+		{"par on a type-along step", func(f fstest.MapFS) {
+			f["t/01-one/step.json"] = file(`{"title":"One","mode":"type-along","file":"a.go","par":3}`)
+		}, []string{"step t/01-one: step.json: start and par are for drills only"}},
 		{"duplicate step number", func(f fstest.MapFS) {
 			f["t/01-again/step.json"] = file(meta1)
 		}, []string{"number 01 is already used"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fsys := twoSteps()
+			fsys := withDrill(twoSteps())
 			c.edit(fsys)
 			_, err := Load(fsys)
 			if err == nil {

@@ -67,6 +67,7 @@ played:
 |---|---|---|
 | `type-along` | The learner types over ghost text; mistakes are red. | Every row matches its target: `render.done`. |
 | `recall` | The learner writes the file from memory: no ghost text, no red. | A `check` that passes. |
+| `drill` | A vim refactor drill: the buffer starts with given code, and the learner edits it into the goal, shown beside it. The keystrokes are compared with a par. | The buffer equals the goal: `render.done`. |
 
 Front ends should be ready for other modes later and may skip steps whose
 mode they don't know.
@@ -82,8 +83,8 @@ step of the first track. An id that isn't listed gets `unknown_step`, and the
 step already in progress (if any) carries on untouched.
 
 The response carries `start` (the step's layout) and `render` (what to paint
-for an empty buffer, see `update`). A second `start` begins a step again from
-scratch.
+for the buffer the attempt begins with, see `update`: an empty buffer, or a
+drill's `buffer`). A second `start` begins a step again from scratch.
 
 ```json
 {"id":3,"op":"start",
@@ -98,6 +99,9 @@ scratch.
 | `indents` | For each target line, its indentation in display columns (tab = 4). In a type-along step the front end inserts this on Enter, so the learner never types indentation. In a recall step the learner's rows need not line up with the target's, so it doesn't apply. |
 | `lines` | Number of target lines. |
 | `width` | Display width of the widest target line, tabs expanded. |
+| `buffer` | Drill only: the lines the buffer holds when the attempt begins. The front end fills the buffer with them. |
+| `goal` | Drill only: the target lines, which the front end shows beside the buffer so the learner can see what to edit it into. |
+| `par` | Drill only: the keystroke count of a good way to do the drill, to show `stats.keys` against. |
 
 ## `update`: judge the buffer
 
@@ -137,18 +141,42 @@ The response carries `render`:
 | `stats.errors` | Mistakes charged in this attempt. This never decreases when a mistake is fixed. A mistake is charged only when it is new and ends exactly at `cursor`, so text shifted by a mid-line edit is shown red but not charged. |
 | `stats.line`, `stats.lines` | How many leading rows fully match, out of the total. |
 | `stats.seconds` | Time since the first typed character. It stops when the attempt is done. |
-| `done` | The attempt has met the step's completion condition. For a type-along step that means every row matches its target with indentation ignored. For a recall step it is always `false`; see below. |
+| `done` | The attempt has met the step's completion condition. For a type-along step that means every row matches its target with indentation ignored. For a drill it means the buffer's rows with code are exactly the goal's rows with code, in order, with indentation and blank rows ignored. For a recall step it is always `false`; see below. |
 | `compute_us` | Engine judging time in microseconds, for latency measurement. |
 
-Comparison rules: leading spaces and tabs are ignored on both sides. Rows are
-compared rune by rune by position, with no alignment. Typed rows beyond the
-target are errors unless they are blank.
+Comparison rules in a type-along step: leading spaces and tabs are ignored
+on both sides. Rows are compared rune by rune by position, with no
+alignment. Typed rows beyond the target are errors unless they are blank.
 
 In a **recall** step nothing is compared: a learner writing from memory may
 put a blank line or a field somewhere else, and a row-by-row comparison would
 then paint correct code red. So `error_spans`, `ghosts` and `ghost_lines`
 are always empty, and of `stats` only `keys` and `seconds` are filled in; the
 rest are 0. The step is completed by a passing `check`.
+
+In a **drill** the buffer begins as the step's start code and the learner
+edits it with vim commands, which insert, delete and move whole lines. So
+rows are not compared by position: one inserted line would make every row
+below it wrong. Instead the buffer's rows are lined up with the goal's by
+their longest common subsequence, the longest list of rows found in the same
+order in both (indentation ignored, as above), and only the rows left over
+are marked. Blank and whitespace-only rows, in the buffer and in the goal,
+are left out before lining up, so an extra or moved blank row is never
+marked and does not keep the drill from being done:
+
+- Between two lined-up rows, the leftover buffer rows and goal rows are
+  paired in order. In each pair only the run that differs is in
+  `error_spans`: the common start and end of the two rows are skipped. If
+  the buffer row only lacks text, the one character where it is missing is
+  marked.
+- A leftover buffer row with no goal row to pair with is marked whole.
+- A goal row missing from the buffer has nothing in the buffer to mark; the
+  front end shows the goal.
+
+`ghosts` and `ghost_lines` are always empty, and no mistakes are charged:
+of `stats` only `keys` and `seconds` are filled in. `seconds` counts from
+the first `update` whose `lines` differ from the start code and stops at
+`done`.
 
 ## `restart`: try the step again
 
@@ -160,7 +188,8 @@ rest are 0. The step is completed by a passing `check`.
 step. The error count and mistake history are cleared, and the timer resets
 (it starts again at the next typed character). The engine process keeps
 running. The response has the same shape as `start`'s, so the front end can
-clear its buffer, reset its key count, and paint the returned `render`.
+clear its buffer (in a drill: put `buffer` back in it), reset its key count,
+and paint the returned `render`.
 
 ## `check`: compile and test the buffer
 
@@ -192,6 +221,7 @@ a few seconds; later ones take about one.
 
 `check` never changes the session. The front end sends it for a type-along
 step once the text matches, and for a recall step when the learner submits.
+A drill is not compiled, so the front end does not send it there.
 In a recall step a passing check is what completes the step; the front end
 decides that from `ok`, and only if the buffer still holds the `lines` it
 sent.
@@ -199,8 +229,10 @@ sent.
 ### Recording a completed step
 
 When a check completes a step, the engine adds one line to its stats file
-(see `stats` below) before it answers. A check completes a step when it
-passes and:
+(see `stats` below) before it answers. A drill has no check: the engine adds
+its line before it answers the first `update` of the attempt whose `render`
+is `done`, and only once per attempt, even if the learner edits away from the
+goal and back. A check completes a step when it passes and:
 
 - in a type-along step, the latest `update` answer was `done`;
 - in a recall step, always;
@@ -222,8 +254,8 @@ line is one JSON object:
 | Field | Meaning |
 |---|---|
 | `step`, `mode` | The step's id and mode. |
-| `wpm`, `accuracy`, `keys`, `errors`, `seconds` | The attempt's `stats` from the latest `update` answer. In a recall step `wpm` and `accuracy` are 0. |
-| `check`, `check_ms` | The check that completed the step: always `"pass"`, and how long it took. |
+| `wpm`, `accuracy`, `keys`, `errors`, `seconds` | The attempt's `stats` from the latest `update` answer. In a recall step `wpm` and `accuracy` are 0; in a drill so is `errors`. |
+| `check`, `check_ms` | The check that completed the step: always `"pass"`, and how long it took. A drill's line leaves both out. |
 | `time` | When the step was completed, RFC 3339. |
 
 If the line cannot be written, the engine says so on stderr and still
@@ -247,7 +279,7 @@ a crash, is skipped.
 | `steps[]` field | Meaning |
 |---|---|
 | `step`, `mode` | The step's id, and its mode in the latest record. Steps are sorted by id. |
-| `best_wpm`, `best_accuracy` | The highest of the step's records. They need not come from the same attempt. 0 for a recall step. |
+| `best_wpm`, `best_accuracy` | The highest of the step's records. They need not come from the same attempt. 0 for a recall step or a drill. |
 | `fewest_keys` | The fewest keystrokes of the step's records. |
 | `completions` | How many times the step was completed. |
 | `last_played` | The `time` of the latest record. |
@@ -273,10 +305,11 @@ exits.
 
 `list`, `unknown_step`, the `step` request field and the `step` and `mode`
 fields of `start` were added within version 1. So were the `check` op and the
-`recall` mode, and the `stats` op. They don't change any existing field's meaning: a `start`
-without `step` behaves as before, a type-along step is judged as before, and
-a front end that doesn't know `recall` can skip those steps, so the version
-stayed at 1.
+`recall` mode, and the `stats` op. So were the `drill` mode and the `buffer`,
+`goal` and `par` fields of `start`. They don't change any existing field's
+meaning: a `start` without `step` behaves as before, a type-along step is
+judged as before, and a front end that doesn't know `recall` or `drill` can
+skip those steps, so the version stayed at 1.
 
 New optional fields may appear in responses within version 1, and front ends
 should ignore fields they don't know. Changing or removing a field's meaning
