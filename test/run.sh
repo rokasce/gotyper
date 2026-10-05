@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Headless end-to-end test of the plugin: starts a real Neovim with only
 # gotyper loaded (--clean skips the learner's config), then drives it over
-# Neovim's RPC socket key by key with test/drive.lua, which asserts.
+# Neovim's RPC socket key by key with test/drive.lua, which asserts. Then
+# runs :checkhealth gotyper with test/health.lua, which asserts every check OK.
 #
 # usage: test/run.sh [delay_ms]    (delay between keys, default 20)
 set -euo pipefail
