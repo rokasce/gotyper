@@ -122,6 +122,11 @@ key("<Esc>")
 check(wait_winbar("gotyper  NORMAL  "), "<Esc> turns the winbar's mode to NORMAL: " .. winbar())
 key("i")
 check(wait_winbar("gotyper  INSERT  "), "i turns it back to INSERT: " .. winbar())
+-- Mode switches edit nothing, yet the winbar's key count still goes up.
+local keys_before = state().keys
+for _, k in ipairs({ "<Esc>", "v", "<Esc>", "A" }) do key(k) end
+check(wait_winbar(("KEYS %d/%d par"):format(keys_before + 4, s.info.par)),
+  "mode switches without an edit raise the winbar's key count: " .. winbar())
 
 -- 4. Restart throws the attempt away: empty buffer, no red, counts back to 0.
 key("<F5>")

@@ -77,13 +77,14 @@ end
 -- set_winbar shows the stats in the game window's own winbar (window-local, so
 -- other windows keep theirs). info is the step layout from the engine's start
 -- answer, for the mode and the par, and mode is vim's current mode (see
--- mode_label). Every step shows its keystrokes against par: for a drill a
--- good way to do it, otherwise the fewest keys that type the code. A recall
--- step has only keystrokes and time to show: without a target there is no
--- accuracy or line count. suffix is extra text such as "[DONE]".
-function M.set_winbar(win, stats, info, mode, suffix)
+-- mode_label). Every step shows its keystrokes, keys, against par: for a
+-- drill a good way to do it, otherwise the fewest keys that type the code. A
+-- recall step has only keystrokes and time to show: without a target there
+-- is no accuracy or line count. suffix is extra text such as "[DONE]".
+function M.set_winbar(win, stats, info, mode, keys, suffix)
   if not api.nvim_win_is_valid(win) then return end
-  local label, keys = M.mode_label(mode), ("KEYS %d/%d par"):format(stats.keys, info.par)
+  local label = M.mode_label(mode)
+  keys = ("KEYS %d/%d par"):format(keys, info.par)
   local text
   if info.mode == "recall" then
     text = (" gotyper  %s  recall  %s  %3.0fs%s"):format(label, keys, stats.seconds, suffix or "")

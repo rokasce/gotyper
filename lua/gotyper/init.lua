@@ -81,10 +81,14 @@ local function show_intro()
 end
 
 -- update_winbar shows the latest stats and vim's current mode, marked while
--- a check runs and once the step is done.
+-- a check runs and once the step is done. The key count is the plugin's own,
+-- which goes up with every key, even one that edits nothing (<Esc>, v, a
+-- motion) and so sends no update. Once done it is the engine's final count,
+-- the one the result panel and the stats show.
 local function update_winbar()
   local suffix = S.checking and "  [checking...]" or S.done and "  [DONE]" or ""
-  ui.set_winbar(S.win, S.last.stats, S.info, api.nvim_get_mode().mode, suffix)
+  local keys = S.done and S.last.stats.keys or S.keys
+  ui.set_winbar(S.win, S.last.stats, S.info, api.nvim_get_mode().mode, keys, suffix)
 end
 
 -- keys_vs_par describes an attempt's keystrokes against the step's par for
@@ -352,6 +356,11 @@ local function install_hooks()
     if S and typed and typed ~= "" and typed ~= panel_key and typed ~= submit_key and not S.done
       and api.nvim_get_current_buf() == S.buf then
       S.keys = S.keys + 1
+      -- Repaint the winbar's count; scheduled, because on_key runs while
+      -- Neovim is still handling the key, where windows may not change.
+      vim.schedule(function()
+        if S and S.last then update_winbar() end
+      end)
     end
   end, ns_key)
 
