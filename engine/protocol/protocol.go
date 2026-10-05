@@ -130,14 +130,16 @@ type Start struct {
 	Lines int `json:"lines"`
 	// Width is the display width of the widest target line, tabs expanded.
 	Width int `json:"width"`
-	// Buffer, Goal and Par are sent for a drill step only. Buffer is what
-	// the buffer holds when the attempt begins (the step's start file),
+	// Par is the keystroke count to measure the attempt's keys against:
+	// a drill's own par, or for a type-along or recall step the fewest
+	// keys that type the target (lesson.TypingPar).
+	Par int `json:"par,omitempty"`
+	// Buffer and Goal are sent for a drill step only. Buffer is what the
+	// buffer holds when the attempt begins (the step's start file), and
 	// Goal is the target the learner edits it into, which the front end
-	// shows beside it, and Par is the keystroke count to measure the
-	// attempt's keys against.
+	// shows beside it.
 	Buffer []string `json:"buffer,omitempty"`
 	Goal   []string `json:"goal,omitempty"`
-	Par    int      `json:"par,omitempty"`
 }
 
 // Stats is the answer to stats: the bests of every step completed so far,

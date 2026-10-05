@@ -158,7 +158,7 @@ func TestStartUpdateRoundTrip(t *testing.T) {
 	}
 
 	st := resps[1].Start
-	if st == nil || st.Lines != 28 || len(st.Indents) != 28 || st.Title == "" || st.Width == 0 {
+	if st == nil || st.Lines != 28 || len(st.Indents) != 28 || st.Title == "" || st.Width == 0 || st.Par == 0 {
 		t.Fatalf("start = %+v", st)
 	}
 	if r := resps[1].Render; r == nil || len(r.GhostLines) != 27 || len(r.Ghosts) != 1 || r.Ghosts[0].Text != "package main" {

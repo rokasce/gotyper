@@ -88,7 +88,7 @@ drill's `buffer`). A second `start` begins a step again from scratch.
 
 ```json
 {"id":3,"op":"start",
- "start":{"step":"json-api/01-greet-handler","mode":"type-along","title":"Step 1 - ...","intro":["Type the ghost text. ..."],"indents":[0,0,0,4,...],"lines":28,"width":59},
+ "start":{"step":"json-api/01-greet-handler","mode":"type-along","title":"Step 1 - ...","intro":["Type the ghost text. ..."],"indents":[0,0,0,4,...],"lines":28,"width":59,"par":542},
  "render":{...}}
 ```
 
@@ -101,7 +101,7 @@ drill's `buffer`). A second `start` begins a step again from scratch.
 | `width` | Display width of the widest target line, tabs expanded. |
 | `buffer` | Drill only: the lines the buffer holds when the attempt begins. The front end fills the buffer with them. |
 | `goal` | Drill only: the target lines, which the front end shows beside the buffer so the learner can see what to edit it into. |
-| `par` | Drill only: the keystroke count of a good way to do the drill, to show `stats.keys` against. |
+| `par` | The keystroke count to show `stats.keys` against. In a drill, the keys of a good way to do the drill, from its lesson. In a type-along or recall step, the fewest keys that type the target into an empty buffer: every character except indentation, plus one per line break (an Enter between two lines). Indentation never counts, because the front end inserts it on Enter, so a blank line costs only its Enter. |
 
 ## `update`: judge the buffer
 
@@ -309,7 +309,9 @@ fields of `start` were added within version 1. So were the `check` op and the
 `goal` and `par` fields of `start`. They don't change any existing field's
 meaning: a `start` without `step` behaves as before, a type-along step is
 judged as before, and a front end that doesn't know `recall` or `drill` can
-skip those steps, so the version stayed at 1.
+skip those steps, so the version stayed at 1. `par` on type-along and recall
+steps came later within version 1 too: it only adds a field to those
+answers.
 
 New optional fields may appear in responses within version 1, and front ends
 should ignore fields they don't know. Changing or removing a field's meaning

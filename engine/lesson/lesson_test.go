@@ -90,6 +90,33 @@ func TestLoadRecallStep(t *testing.T) {
 	}
 }
 
+func TestTypingPar(t *testing.T) {
+	target := []string{
+		"package main",   // 12
+		"",               // a blank line costs only its Enter
+		"func f() {",     // 10
+		"\tif x {",       // 6: the tab is indentation, inserted on Enter
+		"\t\ty := \"é\"", // 8: é is one character, two bytes
+		"\t}",            // 1
+		"}",              // 1
+	}
+	if got, want := TypingPar(target), 12+10+6+8+1+1+6; got != want {
+		t.Fatalf("TypingPar = %d, want %d", got, want)
+	}
+
+	lib, err := Load(withDrill(twoSteps()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// "package main\n\nfunc a() {}": 12 + 11 characters and 2 Enters.
+	if one, _ := lib.Step("t/01-one"); one.Par != 25 {
+		t.Fatalf("type-along par = %d, want 25", one.Par)
+	}
+	if d, _ := lib.Step("t/03-drill"); d.Par != 7 {
+		t.Fatalf("drill par = %d, want its step.json par 7", d.Par)
+	}
+}
+
 // withDrill adds a valid drill step, t/03-drill, to fsys.
 func withDrill(fsys fstest.MapFS) fstest.MapFS {
 	fsys["t/03-drill/step.json"] = file(`{"title":"Drill","mode":"drill","file":"goal.go","start":"start.go","par":7}`)

@@ -55,22 +55,43 @@ function M.paint(buf, render)
   end
 end
 
+-- MODE_LABELS names vim's modes by the first character of
+-- nvim_get_mode().mode, as Neovim's own -- INSERT -- message does. Only the
+-- first character matters: "no" is operator-pending (after d, c, y ...),
+-- still a normal-mode command being typed, so it reads NORMAL, and "ic" is
+-- insert mode with the completion menu open.
+local MODE_LABELS = {
+  n = "NORMAL", i = "INSERT", R = "REPLACE", c = "COMMAND",
+  v = "VISUAL", V = "V-LINE", ["\22"] = "V-BLOCK", -- \22 is CTRL-V
+  s = "SELECT", S = "S-LINE", ["\19"] = "S-BLOCK", -- \19 is CTRL-S
+}
+
+-- mode_label turns a mode from nvim_get_mode().mode, such as "i", "no" or
+-- "V", into the short label the winbar shows, such as INSERT or V-LINE.
+-- Seeing the mode helps a learner who jumps around with motions instead of
+-- only typing: a key typed in the wrong mode is a command, not text.
+function M.mode_label(mode)
+  return MODE_LABELS[mode:sub(1, 1)] or mode:upper()
+end
+
 -- set_winbar shows the stats in the game window's own winbar (window-local, so
 -- other windows keep theirs). info is the step layout from the engine's start
--- answer, for the mode and a drill's par. A recall step has only keystrokes
--- and time to show: without a target there is no accuracy or line count. A
--- drill shows its keystrokes against par. suffix is extra text such as
--- "[DONE]".
-function M.set_winbar(win, stats, info, suffix)
+-- answer, for the mode and the par, and mode is vim's current mode (see
+-- mode_label). Every step shows its keystrokes against par: for a drill a
+-- good way to do it, otherwise the fewest keys that type the code. A recall
+-- step has only keystrokes and time to show: without a target there is no
+-- accuracy or line count. suffix is extra text such as "[DONE]".
+function M.set_winbar(win, stats, info, mode, suffix)
   if not api.nvim_win_is_valid(win) then return end
+  local label, keys = M.mode_label(mode), ("KEYS %d/%d par"):format(stats.keys, info.par)
   local text
   if info.mode == "recall" then
-    text = (" gotyper  recall  KEYS %d  %3.0fs%s"):format(stats.keys, stats.seconds, suffix or "")
+    text = (" gotyper  %s  recall  %s  %3.0fs%s"):format(label, keys, stats.seconds, suffix or "")
   elseif info.mode == "drill" then
-    text = (" gotyper  drill  KEYS %d/%d par  %3.0fs%s"):format(stats.keys, info.par, stats.seconds, suffix or "")
+    text = (" gotyper  %s  drill  %s  %3.0fs%s"):format(label, keys, stats.seconds, suffix or "")
   else
-    text = (" gotyper  WPM %3.0f  ACC %5.1f%%  KEYS %d  line %d/%d  errors %d  %3.0fs%s"):format(
-      stats.wpm, stats.accuracy, stats.keys, stats.line, stats.lines, stats.errors, stats.seconds, suffix or "")
+    text = (" gotyper  %s  WPM %3.0f  ACC %5.1f%%  %s  line %d/%d  errors %d  %3.0fs%s"):format(
+      label, stats.wpm, stats.accuracy, keys, stats.line, stats.lines, stats.errors, stats.seconds, suffix or "")
   end
   -- In a statusline expression % starts an item, so a literal % is written %%.
   vim.wo[win].winbar = "%#TabLineSel#" .. text:gsub("%%", "%%%%") .. "%#Normal#"
