@@ -19,7 +19,7 @@ M.root = root
 
 -- go_binary returns the path of the go command on PATH, or nil when Go is
 -- not installed.
-local function go_binary()
+function M.go_binary()
   local found = vim.fn.exepath("go")
   if found ~= "" then return found end
   return nil
@@ -35,15 +35,26 @@ local function newest_source()
   return newest
 end
 
+-- bin is where the engine binary is built: <root>/bin/gotyper-engine. The
+-- engine finds the lessons as ../lessons beside its own executable, so this
+-- place is what lets it find <root>/lessons.
+M.bin = root .. "/bin/gotyper-engine"
+
+-- up_to_date reports whether the engine binary exists and is newer than every
+-- engine source file, that is, whether ensure() would use it without building.
+function M.up_to_date()
+  local built = vim.fn.getftime(M.bin) -- -1 when the file does not exist
+  return built >= newest_source()
+end
+
 -- ensure returns the path of an up-to-date engine binary, building it into
 -- <root>/bin/ first when it is missing or older than any engine source file.
 -- On failure it returns nil and a message for the learner.
 function M.ensure()
-  local bin = root .. "/bin/gotyper-engine"
-  local built = vim.fn.getftime(bin) -- -1 when the file does not exist
-  if built >= newest_source() then return bin end
+  local bin = M.bin
+  if M.up_to_date() then return bin end
 
-  local go = go_binary()
+  local go = M.go_binary()
   if not go then
     return nil, "gotyper needs Go to build its engine, but the go command was not found.\n"
       .. "Install Go (https://go.dev/dl/) and make sure `go` is on your PATH."

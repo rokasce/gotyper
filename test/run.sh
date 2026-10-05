@@ -16,3 +16,6 @@ nvim --headless --clean --listen "$SOCK" \
 PID=$!
 trap 'kill $PID 2>/dev/null || true; rm -rf "$SOCK" "$XDG_DATA_HOME"' EXIT
 nvim --clean -l "$ROOT/test/drive.lua" "$SOCK" "$ROOT" "$DELAY"
+
+# :checkhealth gotyper must report every check OK on this checkout.
+nvim --headless --clean -c "set rtp^=$ROOT" -c "luafile $ROOT/test/health.lua"
