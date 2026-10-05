@@ -270,7 +270,8 @@ answer.
 | `lua/gotyper/engine.lua` | Builds this engine into `bin/` when its sources are newer than the binary, starts it as a job, and frames NDJSON requests and responses by `id`. Also asks a short-lived engine for `list` and `stats`. |
 | `lua/gotyper/init.lua` | The step picker and the session: the game tab and buffer, change tracking, key counting, auto-indent, restart, checks and their results, drill results, the panel toggle and teardown. Also `:GotyperStats`. |
 | `lua/gotyper/ui.lua` | Painting: error spans and ghosts as extmarks, ghost lines as virtual lines, the stats winbar, the panel, a drill's goal split and the stats window. |
-| `test/run.sh`, `test/drive.lua` | End-to-end test: a real headless Neovim driven key by key over its RPC socket. |
+| `lua/gotyper/health.lua` | `:checkhealth gotyper`: Go on `PATH`, the engine binary (building it when missing or stale), the `hello` handshake and the lessons' track and step counts. |
+| `test/run.sh`, `test/drive.lua`, `test/health.lua` | End-to-end test: a real headless Neovim driven key by key over its RPC socket, then `:checkhealth gotyper` asserted all OK. |
 
 `:Gotyper` without a step id, and completing its argument, run a short-lived
 engine that answers `hello` and `list`; the picker (`vim.ui.select`) shows the
