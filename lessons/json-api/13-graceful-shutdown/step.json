@@ -1,0 +1,29 @@
+{
+  "title": "Step 13 - graceful shutdown",
+  "mode": "type-along",
+  "file": "main.go",
+  "intro": [
+    "`main` replaces the hidden one. On Ctrl-C it now lets",
+    "requests in flight finish before the program exits.",
+    "",
+    "`signal.NotifyContext` returns a context that is",
+    "cancelled when SIGINT (Ctrl-C) or SIGTERM arrives. A",
+    "context is Go's way to tell other code \"stop now\".",
+    "",
+    "`run` serves in a goroutine, because `Serve` blocks",
+    "until the server stops. `select` waits for whichever",
+    "comes first: `Serve` failing, or the context ending.",
+    "Then `Shutdown` stops accepting connections and waits",
+    "for active requests, but only until its own deadline.",
+    "",
+    "`ListenAndServe` is `net.Listen` plus `Serve`. Doing",
+    "the listen in `main` and passing the listener and a",
+    "context to `run` makes `run` testable: the hidden test",
+    "listens on a free port and cancels the context itself,",
+    "no real signal needed.",
+    "",
+    "The zero `http.Server` has no timeouts, so a slow client",
+    "could hold a connection forever. `newServer` sets them."
+  ],
+  "carry": ["03-bookmark-type", "05-bookmark-store", "07-bookmark-routes", "09-bookmark-create"]
+}

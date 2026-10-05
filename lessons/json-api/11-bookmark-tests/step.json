@@ -1,0 +1,25 @@
+{
+  "title": "Step 11 - a table-driven test of create",
+  "mode": "type-along",
+  "file": "create_test.go",
+  "intro": [
+    "This time you type a test. `go test` runs every",
+    "`func TestXxx(t *testing.T)` in a `_test.go` file.",
+    "",
+    "`httptest` calls a handler with no server or network:",
+    "`NewRequest` builds the request, `NewRecorder` is a",
+    "`ResponseWriter` that remembers the status and body.",
+    "",
+    "The test is **table-driven**: each row of `tests` is",
+    "one case, and one loop checks them all. A new case is a",
+    "new row. `t.Run` runs each row as a named subtest, so a",
+    "failure names the case, and `t.Errorf` lets the other",
+    "rows still run.",
+    "",
+    "A test is only useful if it fails when the code is",
+    "wrong. The hidden test runs yours against a `create`",
+    "that skips the url check and one that answers 400 to",
+    "everything: your test must fail against both."
+  ],
+  "carry": ["03-bookmark-type", "05-bookmark-store", "07-bookmark-routes", "09-bookmark-create"]
+}

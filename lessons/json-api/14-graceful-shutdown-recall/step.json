@@ -1,0 +1,30 @@
+{
+  "title": "Step 14 - recall: graceful shutdown from memory",
+  "mode": "recall",
+  "file": "main.go",
+  "intro": [
+    "Write step 13's `main.go` again, from memory. Your",
+    "`Bookmark`, `Store`, routes and `create` are already in",
+    "the module.",
+    "",
+    "- `newServer(h http.Handler) *http.Server` returns a",
+    "  server for `h` with `ReadTimeout`, `WriteTimeout` and",
+    "  `IdleTimeout` set.",
+    "- `run(ctx context.Context, srv *http.Server,",
+    "  ln net.Listener) error` serves on `ln` in a goroutine.",
+    "  If `Serve` fails, it returns that error. When `ctx`",
+    "  ends, it calls `Shutdown` with a deadline context, so",
+    "  requests in flight finish, and returns its result.",
+    "- `main` gets a context from `signal.NotifyContext` for",
+    "  SIGINT and SIGTERM, listens on `:8080`, and runs the",
+    "  routes with `run`.",
+    "",
+    "The hidden tests call `newServer` and `run` directly",
+    "and cancel the context themselves; `main` is only",
+    "compiled.",
+    "",
+    "Press `<F6>` to submit: `go vet` and the step's hidden",
+    "tests decide. If they fail, fix it and submit again."
+  ],
+  "carry": ["03-bookmark-type", "05-bookmark-store", "07-bookmark-routes", "09-bookmark-create"]
+}
