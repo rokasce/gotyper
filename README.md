@@ -14,14 +14,18 @@ It loads your own Neovim config, so your motions and colours work as usual. Use 
 
 The first `:Gotyper` builds the engine into `bin/`, which takes a few seconds. Later launches rebuild only when the engine sources changed.
 
-To install it with [lazy.nvim](https://github.com/folke/lazy.nvim):
+To install it with [lazy.nvim](https://github.com/folke/lazy.nvim), add this to your plugin specs:
 
 ```lua
 {
-  "rokasce/gotyper", -- or: dir = "~/path/to/gotyper"
-  cmd = { "Gotyper", "GotyperRestart", "GotyperPanel", "GotyperSubmit", "GotyperStats" },
+  "rokasce/gotyper",
+  build = "cd engine && go build -o ../bin/gotyper-engine ./cmd/gotyper-engine",
 }
 ```
+
+`build` runs after every install and update and builds the engine into the plugin's own `bin/`, where the engine finds the plugin's `lessons/`. There is no `cmd` or other lazy-loading trigger, because a lazy-loaded plugin is invisible to `:checkhealth gotyper` until one of its commands runs; loading costs nothing, as startup only defines the commands.
+
+Run `:checkhealth gotyper` to see whether everything gotyper needs is in place: Go on your `PATH` and its version, the engine binary (built if it is missing or out of date), the engine answering the handshake with the plugin's protocol version, and the lessons with their track and step counts. A failed check says how to fix it.
 
 ### How a game works
 
@@ -51,7 +55,7 @@ The records live in `gotyper/stats.jsonl` under `$XDG_DATA_HOME`, or under `~/.l
 ### Test the plugin
 
 ```sh
-test/run.sh   # a real headless Neovim (--clean) driven key by key over RPC
+test/run.sh   # a real headless Neovim (--clean) driven key by key over RPC, then :checkhealth gotyper
 ```
 
 ## The engine

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Headless end-to-end test of the plugin: starts a real Neovim with only
 # gotyper loaded (--clean skips the learner's config), then drives it over
-# Neovim's RPC socket key by key with test/drive.lua, which asserts.
+# Neovim's RPC socket key by key with test/drive.lua, which asserts. Then
+# runs :checkhealth gotyper with test/health.lua, which asserts every check OK.
 #
 # usage: test/run.sh [delay_ms]    (delay between keys, default 20)
 set -euo pipefail
@@ -16,3 +17,6 @@ nvim --headless --clean --listen "$SOCK" \
 PID=$!
 trap 'kill $PID 2>/dev/null || true; rm -rf "$SOCK" "$XDG_DATA_HOME"' EXIT
 nvim --clean -l "$ROOT/test/drive.lua" "$SOCK" "$ROOT" "$DELAY"
+
+# :checkhealth gotyper must report every check OK on this checkout.
+nvim --headless --clean -c "set rtp^=$ROOT" -c "luafile $ROOT/test/health.lua"
