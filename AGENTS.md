@@ -4,7 +4,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - Go engine: module `engine/` (`github.com/rokasce/gotyper/engine`). Run `go vet ./...`, `go test ./...` and `go run ./cmd/gotyper-engine --lessons ../lessons --selftest` from `engine/`. `engine/HOW-IT-WORKS.md` maps the files.
 - Lessons live in `lessons/<track>/<NN-slug>/` (format: `lessons/README.md`); `engine/lesson`'s `TestLessonsOnDisk` vets and tests every step's assembled module (drills are only gofmt-checked), so run `go test -count=1 ./...` after touching a lesson (the go test cache does not notice an added lesson directory).
-- Neovim plugin: `plugin/gotyper.lua` + `lua/gotyper/` (paints only; no judging in Lua). Run `test/run.sh` for the headless end-to-end test; it also builds the engine into the gitignored `bin/`.
+- Neovim plugin: `plugin/gotyper.lua` + `lua/gotyper/` (paints only; no judging in Lua; `health.lua` is `:checkhealth gotyper`). Run `test/run.sh` for the headless end-to-end test (game, then health check); it also builds the engine into the gitignored `bin/`.
 - The engine wire format is `engine/PROTOCOL.md`. Keep it in sync with `engine/protocol/protocol.go`, and bump `protocol.Version` on any incompatible change.
 - The learner reads the code (Go and Lua) to learn. Every package and exported identifier gets a doc comment explaining what and why, and non-obvious logic gets a plain-language comment.
 
